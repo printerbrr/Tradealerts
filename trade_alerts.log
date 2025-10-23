@@ -1,0 +1,156 @@
+2025-10-22 16:59:29,868 - __main__ - INFO - Received SMS from test: Buy AAPL at $150
+2025-10-22 16:59:29,869 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T16:59:29.869641",
+  "sender": "test",
+  "original_message": "Buy AAPL at $150",
+  "parsed_data": {
+    "raw_message": "Buy AAPL at $150",
+    "symbol": null,
+    "price": 150.0,
+    "action": "trade_signal",
+    "confidence": null
+  }
+}
+2025-10-22 16:59:29,869 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 16:59:57,498 - __main__ - INFO - Received SMS from test: Sell TSLA at $200
+2025-10-22 16:59:57,499 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T16:59:57.499071",
+  "sender": "test",
+  "original_message": "Sell TSLA at $200",
+  "parsed_data": {
+    "raw_message": "Sell TSLA at $200",
+    "symbol": null,
+    "price": 200.0,
+    "action": "trade_signal",
+    "confidence": null
+  }
+}
+2025-10-22 16:59:57,503 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 17:00:37,079 - __main__ - INFO - Configuration updated: enabled=True parameters={} discord_webhook_url='https://discordapp.com/api/webhooks/1430426928200024064/DEGRKv3-2qNS7GNh_kdgt56aM8aW352fhO8hlZSub5H6DcLdj_CPDsU6O1_oBqa3oV8l'
+2025-10-22 17:00:39,788 - __main__ - INFO - Received SMS from TradeAlert: BUY AAPL NOW at $150.50 - Strong signal!
+2025-10-22 17:00:39,789 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:00:39.789245",
+  "sender": "TradeAlert",
+  "original_message": "BUY AAPL NOW at $150.50 - Strong signal!",
+  "parsed_data": {
+    "raw_message": "BUY AAPL NOW at $150.50 - Strong signal!",
+    "symbol": null,
+    "price": 150.5,
+    "action": "trade_signal",
+    "confidence": null
+  }
+}
+2025-10-22 17:00:40,222 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 17:04:31,621 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON SPY WHEN \\"MovingAvgCrossover(\\"length1\\" = 9, \\"length2\\" = 21, \\"average type1\\" = \\"EXPONENTIAL\\", \\"average type2\\" = \\"EXPONENTIAL\\") is true or MovingAvgCrossover(\\"length1\\" = 9, \\"length2\\" = 21, \\"average type1\\" = \\"EXPO\\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 5MIN TF"}'
+2025-10-22 17:04:31,622 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 5MIN TF
+2025-10-22 17:04:31,622 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:04:31.622018",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 5MIN TF",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 5MIN TF",
+    "symbol": null,
+    "price": 1.0,
+    "action": null,
+    "confidence": null
+  }
+}
+2025-10-22 17:05:10,980 - __main__ - INFO - Raw request body: b'{\n     "sender": "81861",\n     "message": "Schwab:\n ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."\n   }'
+2025-10-22 17:05:10,980 - __main__ - WARNING - JSON parse failed: Invalid control character at: line 3 column 25 (char 50)
+2025-10-22 17:05:10,980 - __main__ - INFO - Raw body string: {
+     "sender": "81861",
+     "message": "Schwab:
+ ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."
+   }
+2025-10-22 17:05:10,980 - __main__ - INFO - Received SMS from unknown: {
+     "sender": "81861",
+     "message": "Schwab:
+ ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."
+   }
+2025-10-22 17:05:10,980 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:05:10.980576",
+  "sender": "unknown",
+  "original_message": "{\n     \"sender\": \"81861\",\n     \"message\": \"Schwab:\n ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.\"\n   }",
+  "parsed_data": {
+    "raw_message": "{\n     \"sender\": \"81861\",\n     \"message\": \"Schwab:\n ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.\"\n   }",
+    "symbol": null,
+    "price": 81861.0,
+    "action": null,
+    "confidence": null
+  }
+}
+2025-10-22 17:05:10,980 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 17:05:38,511 - __main__ - INFO - Raw request body: b'{\n     "sender": "81861",\n     "message": "Schwab:\n ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."\n   }'
+2025-10-22 17:05:38,511 - __main__ - WARNING - JSON parse failed: Invalid control character at: line 3 column 25 (char 50)
+2025-10-22 17:05:38,511 - __main__ - INFO - Raw body string: {
+     "sender": "81861",
+     "message": "Schwab:
+ ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."
+   }
+2025-10-22 17:05:38,511 - __main__ - INFO - Received SMS from unknown: {
+     "sender": "81861",
+     "message": "Schwab:
+ ALERT ON SPY WHEN "MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true or MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPO" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."
+   }
+2025-10-22 17:05:38,511 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:05:38.511742",
+  "sender": "unknown",
+  "original_message": "{\n     \"sender\": \"81861\",\n     \"message\": \"Schwab:\n ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.\"\n   }",
+  "parsed_data": {
+    "raw_message": "{\n     \"sender\": \"81861\",\n     \"message\": \"Schwab:\n ALERT ON SPY WHEN \"MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true or MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPO\" IS TRUE SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.\"\n   }",
+    "symbol": null,
+    "price": 81861.0,
+    "action": null,
+    "confidence": null
+  }
+}
+2025-10-22 17:05:38,511 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 17:07:44,552 - __main__ - INFO - Configuration updated: enabled=True parameters={} discord_webhook_url='https://discordapp.com/api/webhooks/1430426928200024064/DEGRKv3-2qNS7GNh_kdgt56aM8aW352fhO8hlZSub5H6DcLdj_CPDsU6O1_oBqa3oV8l'
+2025-10-22 17:07:49,545 - __main__ - INFO - Raw request body: b'{"sender": "81861", "message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\\"length1\\" = 9, \\"length2\\" = 21, \\"average type1\\" = \\"EXPONENTIAL\\", \\"average type2\\" = \\"EXPONENTIAL\\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF"}'
+2025-10-22 17:07:49,545 - __main__ - INFO - Received SMS from 81861: Schwab: ALERT ON SPY WHEN MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+2025-10-22 17:07:49,545 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:07:49.545219",
+  "sender": "81861",
+  "original_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF",
+  "parsed_data": {
+    "raw_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF",
+    "symbol": "SPY",
+    "price": 667.19,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MINUTE TF",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 15:30:30",
+    "study_details": "1.00.",
+    "ema_short": 9,
+    "ema_long": 21
+  }
+}
+2025-10-22 17:07:49,969 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 17:09:30,049 - __main__ - INFO - Configuration updated: enabled=True parameters={} discord_webhook_url='https://discordapp.com/api/webhooks/1430426928200024064/DEGRKv3-2qNS7GNh_kdgt56aM8aW352fhO8hlZSub5H6DcLdj_CPDsU6O1_oBqa3oV8l'
+2025-10-22 17:09:35,041 - __main__ - INFO - Raw request body: b'{"sender": "81861", "message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\\"length1\\" = 9, \\"length2\\" = 21, \\"average type1\\" = \\"EXPONENTIAL\\", \\"average type2\\" = \\"EXPONENTIAL\\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF"}'
+2025-10-22 17:09:35,041 - __main__ - INFO - Received SMS from 81861: Schwab: ALERT ON SPY WHEN MovingAvgCrossover("length1" = 9, "length2" = 21, "average type1" = "EXPONENTIAL", "average type2" = "EXPONENTIAL") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF
+2025-10-22 17:09:35,041 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T17:09:35.041191",
+  "sender": "81861",
+  "original_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF",
+  "parsed_data": {
+    "raw_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(\"length1\" = 9, \"length2\" = 21, \"average type1\" = \"EXPONENTIAL\", \"average type2\" = \"EXPONENTIAL\") is true SUBMIT AT 10/22/25 15:30:30 is triggered MARK = 667.19; STUDY = 1.00. 921 EMA CROSS 5MINUTE TF",
+    "symbol": "SPY",
+    "price": 667.19,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MINUTE TF",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 15:30:30",
+    "study_details": "1.00.",
+    "ema_short": 9,
+    "ema_long": 21
+  }
+}
+2025-10-22 17:09:35,041 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 17:09:35,311 - __main__ - INFO - Discord alert sent successfully
