@@ -294,11 +294,11 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             try:
                 from datetime import datetime
                 dt = datetime.strptime(trigger_time, "%m/%d/%Y %H:%M:%S")
-                display_time = dt.strftime("%H:%M")
+                display_time = dt.strftime("%I:%M %p")
             except:
-                display_time = datetime.now().strftime("%H:%M")
+                display_time = datetime.now().strftime("%I:%M %p")
         else:
-            display_time = datetime.now().strftime("%H:%M")
+            display_time = datetime.now().strftime("%I:%M %p")
             
         message = f"""**EMA CROSSOVER DETECTED**
 **TICKER:** {parsed.get('symbol', 'N/A')}
