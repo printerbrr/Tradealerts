@@ -302,10 +302,14 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         # Use trigger time from SMS if available, otherwise current time
         trigger_time = parsed.get('trigger_time')
         if trigger_time:
-            # Extract time from trigger_time (format: "12/15/2024 14:30:00")
+            # Extract time from trigger_time (format: "12/15/2024 14:30:00" or "10/22/25 21:08:48")
             try:
                 from datetime import datetime
-                dt = datetime.strptime(trigger_time, "%m/%d/%Y %H:%M:%S")
+                # Try 4-digit year first, then 2-digit year
+                try:
+                    dt = datetime.strptime(trigger_time, "%m/%d/%Y %H:%M:%S")
+                except ValueError:
+                    dt = datetime.strptime(trigger_time, "%m/%d/%y %H:%M:%S")
                 display_time = dt.strftime("%I:%M %p")
             except:
                 display_time = datetime.now().strftime("%I:%M %p")
