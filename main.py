@@ -287,12 +287,24 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         parsed = log_data['parsed_data']
         
         # Simple, clean Discord message
-        current_time = datetime.now().strftime("%H:%M")
+        # Use trigger time from SMS if available, otherwise current time
+        trigger_time = parsed.get('trigger_time')
+        if trigger_time:
+            # Extract time from trigger_time (format: "12/15/2024 14:30:00")
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(trigger_time, "%m/%d/%Y %H:%M:%S")
+                display_time = dt.strftime("%H:%M")
+            except:
+                display_time = datetime.now().strftime("%H:%M")
+        else:
+            display_time = datetime.now().strftime("%H:%M")
+            
         message = f"""**EMA CROSSOVER DETECTED**
 **TICKER:** {parsed.get('symbol', 'N/A')}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
-**TIME:** {current_time}"""
+**TIME:** {display_time}"""
         
         payload = {
             "content": message
