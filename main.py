@@ -38,6 +38,14 @@ class AlertConfig(BaseModel):
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
 
+# Load Discord webhook URL from environment variable
+discord_webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+if discord_webhook_url:
+    alert_config.discord_webhook_url = discord_webhook_url
+    logger.info(f"Discord webhook URL loaded from environment: {discord_webhook_url[:50]}...")
+else:
+    logger.warning("DISCORD_WEBHOOK_URL environment variable not set")
+
 @app.get("/")
 async def root():
     return {"message": "Trade Alerts SMS Parser is running", "status": "healthy"}
