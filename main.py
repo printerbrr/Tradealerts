@@ -287,10 +287,12 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         parsed = log_data['parsed_data']
         
         # Simple, clean Discord message
+        current_time = datetime.now().strftime("%H:%M")
         message = f"""**EMA CROSSOVER DETECTED**
 **TICKER:** {parsed.get('symbol', 'N/A')}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
-**MARK:** ${parsed.get('price', 'N/A')}"""
+**MARK:** ${parsed.get('price', 'N/A')}
+**TIME:** {current_time}"""
         
         payload = {
             "content": message
