@@ -170,10 +170,22 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
         if price_match:
             parsed["price"] = float(price_match.group(1))
         
-        # Extract timeframe
-        tf_match = re.search(r'(\d+MIN\s*TF|\d+MINUTE\s*TF|MIN\s*TF)', message, re.IGNORECASE)
+        # Extract timeframe - handle "5MIN TF", "1DAY TF", "4HOUR TF", etc.
+        tf_match = re.search(r'(\d+(?:MIN|HOUR|DAY|MINUTE))\s*TF', message, re.IGNORECASE)
         if tf_match:
             parsed["timeframe"] = tf_match.group(1).strip()
+        
+        # Extract EMA pair from "TF XXX" pattern (e.g., "5MIN TF 921" = 9/21 EMAs)
+        ema_tf_match = re.search(r'TF\s*(\d{3,4})', message, re.IGNORECASE)
+        if ema_tf_match:
+            ema_code = ema_tf_match.group(1)
+            # Parse 3-4 digit codes: 921 = 9/21, 950 = 9/50, 2150 = 21/50
+            if len(ema_code) == 3:
+                parsed["ema_short"] = int(ema_code[0])
+                parsed["ema_long"] = int(ema_code[1:])
+            elif len(ema_code) == 4:
+                parsed["ema_short"] = int(ema_code[:2])
+                parsed["ema_long"] = int(ema_code[2:])
         
         # Extract trigger time
         time_match = re.search(r'SUBMIT AT (\d+/\d+/\d+ \d+:\d+:\d+)', message, re.IGNORECASE)
@@ -300,7 +312,12 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         else:
             display_time = datetime.now().strftime("%I:%M %p")
             
-        message = f"""**EMA CROSSOVER DETECTED**
+        # Format EMA pair for display
+        ema_pair = "N/A"
+        if parsed.get('ema_short') and parsed.get('ema_long'):
+            ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
+
+        message = f"""**EMA CROSSOVER - {ema_pair}**
 **TICKER:** {parsed.get('symbol', 'N/A')}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
