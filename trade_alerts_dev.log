@@ -1,0 +1,28 @@
+2025-10-24 14:50:43,342 - __main__ - INFO - [DEV] Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 14:50:43,387 - __main__ - INFO - ============================================================
+2025-10-24 14:50:43,387 - __main__ - INFO - STARTING DEVELOPMENT VERSION
+2025-10-24 14:50:43,387 - __main__ - INFO - Port: 8001
+2025-10-24 14:50:43,387 - __main__ - INFO - Database: market_states_dev.db
+2025-10-24 14:50:43,387 - __main__ - INFO - Log File: trade_alerts_dev.log
+2025-10-24 14:50:43,387 - __main__ - INFO - ============================================================
+2025-10-24 14:50:43,391 - asyncio - DEBUG - Using proactor: IocpProactor
+2025-10-24 14:50:59,479 - __main__ - INFO - Raw request body: b'{"sender": "Test", "message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE"}'
+2025-10-24 14:50:59,479 - __main__ - INFO - [DEV] Received SMS from Test: Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE
+2025-10-24 14:50:59,480 - __main__ - INFO - [DEV] Parsed data: {
+  "timestamp": "2025-10-24T14:50:59.479223",
+  "sender": "Test",
+  "original_message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE",
+  "parsed_data": {
+    "raw_message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE",
+    "symbol": "SPY",
+    "price": 678.25,
+    "action": "macd_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/24/25 10:46:06",
+    "study_details": "1.00.",
+    "macd_direction": "bullish"
+  }
+}
+2025-10-24 14:50:59,528 - __main__ - INFO - [DEV] ALERT FILTERED: Current time 02:50 PM is outside alert hours (5 AM - 1 PM PST/PDT)
