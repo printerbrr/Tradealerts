@@ -154,3 +154,325 @@ To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply 
 }
 2025-10-22 17:09:35,041 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
 2025-10-22 17:09:35,311 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:46:50,429 - __main__ - WARNING - DISCORD_WEBHOOK_URL environment variable not set
+2025-10-22 19:46:55,929 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON AAPL MARK = 150.25 1DAY TF SUBMIT AT 12/15/2024 14:30:00 STUDY = 1.2 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:46:55,929 - __main__ - INFO - Received SMS from Schwab: ALERT ON AAPL MARK = 150.25 1DAY TF SUBMIT AT 12/15/2024 14:30:00 STUDY = 1.2 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:46:55,930 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:46:55.930032",
+  "sender": "Schwab",
+  "original_message": "ALERT ON AAPL MARK = 150.25 1DAY TF SUBMIT AT 12/15/2024 14:30:00 STUDY = 1.2 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON AAPL MARK = 150.25 1DAY TF SUBMIT AT 12/15/2024 14:30:00 STUDY = 1.2 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "AAPL",
+    "price": 150.25,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 14:30:00",
+    "study_details": "1.2"
+  }
+}
+2025-10-22 19:46:55,930 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:46:55,930 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 19:47:28,872 - __main__ - INFO - Discord webhook URL loaded from environment: https://discord.com/api/webhooks/test...
+2025-10-22 19:47:34,657 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON TSLA MARK = 245.80 1DAY TF SUBMIT AT 12/15/2024 15:45:00 STUDY = 1.5 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:47:34,657 - __main__ - INFO - Received SMS from Schwab: ALERT ON TSLA MARK = 245.80 1DAY TF SUBMIT AT 12/15/2024 15:45:00 STUDY = 1.5 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:47:34,657 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:47:34.657250",
+  "sender": "Schwab",
+  "original_message": "ALERT ON TSLA MARK = 245.80 1DAY TF SUBMIT AT 12/15/2024 15:45:00 STUDY = 1.5 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON TSLA MARK = 245.80 1DAY TF SUBMIT AT 12/15/2024 15:45:00 STUDY = 1.5 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "TSLA",
+    "price": 245.8,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 15:45:00",
+    "study_details": "1.5"
+  }
+}
+2025-10-22 19:47:34,657 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:47:34,657 - __main__ - WARNING - Discord webhook URL not configured
+2025-10-22 19:48:09,170 - __main__ - INFO - Discord webhook URL loaded from environment: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-22 19:48:15,130 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON NVDA MARK = 875.50 1DAY TF SUBMIT AT 12/15/2024 16:20:00 STUDY = 1.8 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:48:15,130 - __main__ - INFO - Received SMS from Schwab: ALERT ON NVDA MARK = 875.50 1DAY TF SUBMIT AT 12/15/2024 16:20:00 STUDY = 1.8 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:48:15,131 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:48:15.131056",
+  "sender": "Schwab",
+  "original_message": "ALERT ON NVDA MARK = 875.50 1DAY TF SUBMIT AT 12/15/2024 16:20:00 STUDY = 1.8 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON NVDA MARK = 875.50 1DAY TF SUBMIT AT 12/15/2024 16:20:00 STUDY = 1.8 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "NVDA",
+    "price": 875.5,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 16:20:00",
+    "study_details": "1.8"
+  }
+}
+2025-10-22 19:48:15,131 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:48:15,402 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:48:37,167 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON SPY MARK = 445.75 1DAY TF SUBMIT AT 12/15/2024 17:15:00 STUDY = 1.3 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:48:37,167 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY MARK = 445.75 1DAY TF SUBMIT AT 12/15/2024 17:15:00 STUDY = 1.3 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:48:37,167 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:48:37.167635",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY MARK = 445.75 1DAY TF SUBMIT AT 12/15/2024 17:15:00 STUDY = 1.3 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY MARK = 445.75 1DAY TF SUBMIT AT 12/15/2024 17:15:00 STUDY = 1.3 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "SPY",
+    "price": 445.75,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 17:15:00",
+    "study_details": "1.3"
+  }
+}
+2025-10-22 19:48:37,167 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:48:37,423 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:50:17,649 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON QQQ MARK = 385.20 1DAY TF SUBMIT AT 12/15/2024 15:30:00 STUDY = 1.4 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:50:17,649 - __main__ - INFO - Received SMS from Schwab: ALERT ON QQQ MARK = 385.20 1DAY TF SUBMIT AT 12/15/2024 15:30:00 STUDY = 1.4 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:50:17,649 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:50:17.649383",
+  "sender": "Schwab",
+  "original_message": "ALERT ON QQQ MARK = 385.20 1DAY TF SUBMIT AT 12/15/2024 15:30:00 STUDY = 1.4 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON QQQ MARK = 385.20 1DAY TF SUBMIT AT 12/15/2024 15:30:00 STUDY = 1.4 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "QQQ",
+    "price": 385.2,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 15:30:00",
+    "study_details": "1.4"
+  }
+}
+2025-10-22 19:50:17,649 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:50:17,982 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:50:43,045 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON MSFT MARK = 425.60 1DAY TF SUBMIT AT 12/15/2024 14:45:00 STUDY = 1.6 movingavgcrossover length1=9 length2=21 exponential"}'
+2025-10-22 19:50:43,045 - __main__ - INFO - Received SMS from Schwab: ALERT ON MSFT MARK = 425.60 1DAY TF SUBMIT AT 12/15/2024 14:45:00 STUDY = 1.6 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:50:43,045 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:50:43.045396",
+  "sender": "Schwab",
+  "original_message": "ALERT ON MSFT MARK = 425.60 1DAY TF SUBMIT AT 12/15/2024 14:45:00 STUDY = 1.6 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON MSFT MARK = 425.60 1DAY TF SUBMIT AT 12/15/2024 14:45:00 STUDY = 1.6 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "MSFT",
+    "price": 425.6,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "12/15/2024 14:45:00",
+    "study_details": "1.6"
+  }
+}
+2025-10-22 19:50:43,045 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:50:43,268 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:51:52,799 - __main__ - INFO - Raw request body: b'{\r\n    "message":  "ALERT ON SPY MARK = 448.25 4HOUR TF SUBMIT AT 10/22/2025 19:51:50 STUDY = 1.7 movingavgcrossover length1=9 length2=21 exponential",\r\n    "sender":  "Schwab"\r\n}'
+2025-10-22 19:51:52,799 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY MARK = 448.25 4HOUR TF SUBMIT AT 10/22/2025 19:51:50 STUDY = 1.7 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:51:52,800 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:51:52.800282",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY MARK = 448.25 4HOUR TF SUBMIT AT 10/22/2025 19:51:50 STUDY = 1.7 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY MARK = 448.25 4HOUR TF SUBMIT AT 10/22/2025 19:51:50 STUDY = 1.7 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "SPY",
+    "price": 448.25,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/2025 19:51:50",
+    "study_details": "1.7"
+  }
+}
+2025-10-22 19:51:52,800 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:51:53,044 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 19:52:16,173 - __main__ - INFO - Discord webhook URL loaded from environment: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-22 19:52:22,211 - __main__ - INFO - Raw request body: b'{\r\n    "message":  "ALERT ON SPY MARK = 450.15 4HOUR TF SUBMIT AT 10/22/2025 19:52:20 STUDY = 1.9 movingavgcrossover length1=9 length2=21 exponential",\r\n    "sender":  "Schwab"\r\n}'
+2025-10-22 19:52:22,211 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY MARK = 450.15 4HOUR TF SUBMIT AT 10/22/2025 19:52:20 STUDY = 1.9 movingavgcrossover length1=9 length2=21 exponential
+2025-10-22 19:52:22,212 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T19:52:22.212424",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY MARK = 450.15 4HOUR TF SUBMIT AT 10/22/2025 19:52:20 STUDY = 1.9 movingavgcrossover length1=9 length2=21 exponential",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY MARK = 450.15 4HOUR TF SUBMIT AT 10/22/2025 19:52:20 STUDY = 1.9 movingavgcrossover length1=9 length2=21 exponential",
+    "symbol": "SPY",
+    "price": 450.15,
+    "action": "moving_average_crossover",
+    "confidence": "high",
+    "timeframe": null,
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/2025 19:52:20",
+    "study_details": "1.9"
+  }
+}
+2025-10-22 19:52:22,212 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 19:52:22,549 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 22:51:44,044 - __main__ - INFO - Discord webhook URL loaded from environment: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-22 22:51:54,152 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921"}'
+2025-10-22 22:51:54,152 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921
+2025-10-22 22:51:54,153 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T22:51:54.153360",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921",
+    "symbol": "SPY",
+    "price": 668.59,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 21:08:48",
+    "study_details": "1.00.",
+    "ema_short": 9,
+    "ema_long": 21
+  }
+}
+2025-10-22 22:51:54,153 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 22:51:54,453 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 22:52:01,577 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON QQQ WHEN MovingAvgCrossover(length1 = 9, length2 = 50) is true SUBMIT AT 10/22/25 21:10:15 MARK = 385.20 STUDY = 1.50. 1DAY TF 950"}'
+2025-10-22 22:52:01,577 - __main__ - INFO - Received SMS from Schwab: ALERT ON QQQ WHEN MovingAvgCrossover(length1 = 9, length2 = 50) is true SUBMIT AT 10/22/25 21:10:15 MARK = 385.20 STUDY = 1.50. 1DAY TF 950
+2025-10-22 22:52:01,577 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T22:52:01.577093",
+  "sender": "Schwab",
+  "original_message": "ALERT ON QQQ WHEN MovingAvgCrossover(length1 = 9, length2 = 50) is true SUBMIT AT 10/22/25 21:10:15 MARK = 385.20 STUDY = 1.50. 1DAY TF 950",
+  "parsed_data": {
+    "raw_message": "ALERT ON QQQ WHEN MovingAvgCrossover(length1 = 9, length2 = 50) is true SUBMIT AT 10/22/25 21:10:15 MARK = 385.20 STUDY = 1.50. 1DAY TF 950",
+    "symbol": "QQQ",
+    "price": 385.2,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "1DAY",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 21:10:15",
+    "study_details": "1.50.",
+    "ema_short": 9,
+    "ema_long": 50
+  }
+}
+2025-10-22 22:52:01,577 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 22:52:01,831 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 22:52:08,989 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON NVDA WHEN MovingAvgCrossover(length1 = 21, length2 = 50) is true SUBMIT AT 10/22/25 21:12:30 MARK = 875.50 STUDY = 1.80. 4HOUR TF 2150"}'
+2025-10-22 22:52:08,990 - __main__ - INFO - Received SMS from Schwab: ALERT ON NVDA WHEN MovingAvgCrossover(length1 = 21, length2 = 50) is true SUBMIT AT 10/22/25 21:12:30 MARK = 875.50 STUDY = 1.80. 4HOUR TF 2150
+2025-10-22 22:52:08,990 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T22:52:08.990878",
+  "sender": "Schwab",
+  "original_message": "ALERT ON NVDA WHEN MovingAvgCrossover(length1 = 21, length2 = 50) is true SUBMIT AT 10/22/25 21:12:30 MARK = 875.50 STUDY = 1.80. 4HOUR TF 2150",
+  "parsed_data": {
+    "raw_message": "ALERT ON NVDA WHEN MovingAvgCrossover(length1 = 21, length2 = 50) is true SUBMIT AT 10/22/25 21:12:30 MARK = 875.50 STUDY = 1.80. 4HOUR TF 2150",
+    "symbol": "NVDA",
+    "price": 875.5,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "4HOUR",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 21:12:30",
+    "study_details": "1.80.",
+    "ema_short": 21,
+    "ema_long": 50
+  }
+}
+2025-10-22 22:52:08,990 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 22:52:09,413 - __main__ - INFO - Discord alert sent successfully
+2025-10-22 22:57:26,139 - __main__ - INFO - Discord webhook URL loaded from environment: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-22 22:57:32,683 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921"}'
+2025-10-22 22:57:32,683 - __main__ - INFO - Received SMS from Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921
+2025-10-22 22:57:32,684 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-22T22:57:32.684751",
+  "sender": "Schwab",
+  "original_message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921",
+  "parsed_data": {
+    "raw_message": "ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true SUBMIT AT 10/22/25 21:08:48 MARK = 668.59 STUDY = 1.00. 5MIN TF 921",
+    "symbol": "SPY",
+    "price": 668.59,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/22/25 21:08:48",
+    "study_details": "1.00.",
+    "ema_short": 9,
+    "ema_long": 21
+  }
+}
+2025-10-22 22:57:32,684 - __main__ - INFO - CROSSOVER DETECTED! Triggering Discord alert
+2025-10-22 22:57:33,049 - __main__ - INFO - Discord alert sent successfully
+2025-10-24 09:37:26,389 - main - WARNING - DISCORD_WEBHOOK_URL environment variable not set
+2025-10-24 09:37:26,390 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:37:33,681 - main - WARNING - DISCORD_WEBHOOK_URL environment variable not set
+2025-10-24 09:37:33,683 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:38:26,343 - main - WARNING - DISCORD_WEBHOOK_URL environment variable not set
+2025-10-24 09:38:26,345 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:38:26,345 - main - WARNING - Discord webhook URL not configured
+2025-10-24 09:39:12,241 - main - INFO - Discord webhook URL loaded from environment: YOUR_WEBHOOK_URL_HERE...
+2025-10-24 09:39:12,242 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:39:59,287 - main - INFO - Discord webhook URL loaded: YOUR_WEBHOOK_URL_HERE...
+2025-10-24 09:39:59,289 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:39:59,391 - main - ERROR - Error sending Discord alert: Invalid URL 'YOUR_WEBHOOK_URL_HERE': No scheme supplied. Perhaps you meant https://YOUR_WEBHOOK_URL_HERE?
+2025-10-24 09:40:08,364 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 09:40:08,366 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 09:40:08,711 - main - INFO - Discord alert sent successfully
+2025-10-24 10:40:44,894 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:40:44,895 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 10:41:02,140 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:41:12,313 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:41:23,892 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:41:31,282 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:41:40,509 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:41:40,904 - main - INFO - Discord alert sent successfully
+2025-10-24 10:47:17,354 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:47:17,356 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 10:47:20,947 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:47:29,448 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:47:37,157 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:47:37,160 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 10:47:37,467 - main - INFO - Discord alert sent successfully
+2025-10-24 10:47:51,108 - __main__ - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 10:48:08,158 - __main__ - INFO - Raw request body: b'{"sender": "Schwab", "message": "Schwab:\\n ALERT ON SPY WHEN \\"MACDHistogramCrossover(\\"crossing type\\" = \\"Negative to Positive\\") is true;5m\\" IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE\\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop."}'
+2025-10-24 10:48:08,158 - __main__ - INFO - Received SMS from Schwab: Schwab:
+ ALERT ON SPY WHEN "MACDHistogramCrossover("crossing type" = "Negative to Positive") is true;5m" IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE
+To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.
+2025-10-24 10:48:08,159 - __main__ - INFO - Parsed data: {
+  "timestamp": "2025-10-24T10:48:08.159130",
+  "sender": "Schwab",
+  "original_message": "Schwab:\n ALERT ON SPY WHEN \"MACDHistogramCrossover(\"crossing type\" = \"Negative to Positive\") is true;5m\" IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.",
+  "parsed_data": {
+    "raw_message": "Schwab:\n ALERT ON SPY WHEN \"MACDHistogramCrossover(\"crossing type\" = \"Negative to Positive\") is true;5m\" IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE\nTo stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply Stop.",
+    "symbol": "SPY",
+    "price": 678.25,
+    "action": "macd_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/24/25 10:46:06",
+    "study_details": "1.00.",
+    "macd_direction": "bullish"
+  }
+}
+2025-10-24 10:48:08,159 - __main__ - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 10:48:08,540 - __main__ - INFO - Discord alert sent successfully
+2025-10-24 11:30:04,417 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 11:30:04,419 - main - INFO - MACD CROSSOVER DETECTED! Triggering Discord alert
+2025-10-24 11:48:25,561 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 11:48:35,076 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 11:48:45,917 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 11:48:53,366 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 12:59:02,028 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 12:59:11,518 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 12:59:11,863 - main - INFO - Discord alert sent successfully
+2025-10-24 13:32:59,763 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 13:33:12,655 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 13:33:12,703 - main - INFO - ALERT FILTERED: Current time 01:33 PM is outside alert hours (5 AM - 1 PM PST/PDT)
+2025-10-24 13:33:21,212 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 13:33:21,259 - main - INFO - ALERT FILTERED: Current time 01:33 PM is outside alert hours (5 AM - 1 PM PST/PDT)

@@ -1,0 +1,234 @@
+# Trend Tracking and Higher Timeframe Confirmation System
+
+## Overview
+
+Add persistent trend tracking that remembers the bullish/bearish state for each ticker across timeframes, and alerts when crossovers align with higher timeframe trends.
+
+## Key Components
+
+### 1. Create Trend State Storage System
+
+**Add after line 47 in `main.py`:**
+
+```python
+# Trend state storage file
+TREND_STATE_FILE = "trend_states.json"
+
+# Timeframe hierarchy for higher TF lookups
+TIMEFRAME_HIERARCHY = ["5MIN", "15MIN", "30MIN", "1HOUR", "4HOUR", "1DAY"]
+
+# Global trend state dictionary
+# Structure: {ticker: {timeframe: {ema_pair: {"trend": "bullish/bearish", "timestamp": "...", "price": ...}}}}
+trend_states = {}
+
+def load_trend_states():
+    """Load trend states from JSON file"""
+    global trend_states
+    try:
+        if os.path.exists(TREND_STATE_FILE):
+            with open(TREND_STATE_FILE, 'r') as f:
+                trend_states = json.load(f)
+            logger.info(f"Loaded {len(trend_states)} ticker trend states")
+    except Exception as e:
+        logger.error(f"Error loading trend states: {e}")
+        trend_states = {}
+
+def save_trend_states():
+    """Save trend states to JSON file"""
+    try:
+        with open(TREND_STATE_FILE, 'w') as f:
+            json.dump(trend_states, f, indent=2)
+        logger.info("Trend states saved successfully")
+    except Exception as e:
+        logger.error(f"Error saving trend states: {e}")
+
+def determine_crossover_direction(parsed_data: Dict[str, Any]) -> str:
+    """
+    Determine if crossover is bullish or bearish
+    Bullish: fast EMA crosses above slow EMA
+    Bearish: fast EMA crosses below slow EMA
+    """
+    # For now, use STUDY value as indicator
+    # Positive STUDY = bullish, negative = bearish
+    study = parsed_data.get('study_details', '')
+    try:
+        study_val = float(study.replace('.', '', study.count('.') - 1))
+        return "bullish" if study_val > 0 else "bearish"
+    except:
+        # Default: assume bullish for positive crossovers
+        return "bullish"
+
+def update_trend_state(parsed_data: Dict[str, Any], crossover_direction: str):
+    """Update the trend state for a ticker/timeframe/ema_pair"""
+    symbol = parsed_data.get('symbol')
+    timeframe = parsed_data.get('timeframe')
+    ema_short = parsed_data.get('ema_short')
+    ema_long = parsed_data.get('ema_long')
+    
+    if not all([symbol, timeframe, ema_short, ema_long]):
+        return
+    
+    ema_pair = f"{ema_short}/{ema_long}"
+    
+    # Initialize nested structure if needed
+    if symbol not in trend_states:
+        trend_states[symbol] = {}
+    if timeframe not in trend_states[symbol]:
+        trend_states[symbol][timeframe] = {}
+    
+    # Update state
+    trend_states[symbol][timeframe][ema_pair] = {
+        "trend": crossover_direction,
+        "timestamp": parsed_data.get('trigger_time', datetime.now().isoformat()),
+        "price": parsed_data.get('price')
+    }
+    
+    # Save to file
+    save_trend_states()
+    logger.info(f"Updated {symbol} {timeframe} {ema_pair} to {crossover_direction}")
+
+def get_higher_timeframe_trend(symbol: str, current_timeframe: str, ema_pair: str) -> Optional[Dict[str, Any]]:
+    """Get the trend of the next higher timeframe"""
+    try:
+        current_idx = TIMEFRAME_HIERARCHY.index(current_timeframe)
+        if current_idx < len(TIMEFRAME_HIERARCHY) - 1:
+            higher_tf = TIMEFRAME_HIERARCHY[current_idx + 1]
+            
+            if symbol in trend_states:
+                if higher_tf in trend_states[symbol]:
+                    if ema_pair in trend_states[symbol][higher_tf]:
+                        return {
+                            "timeframe": higher_tf,
+                            "trend": trend_states[symbol][higher_tf][ema_pair]["trend"]
+                        }
+    except (ValueError, KeyError, IndexError):
+        pass
+    
+    return None
+```
+
+### 2. Load Trend States on Startup
+
+**After line 47 (after loading Discord webhook), add:**
+
+```python
+# Load existing trend states
+load_trend_states()
+```
+
+### 3. Update Alert Processing
+
+**In `analyze_data()` function (around line 253), after detecting crossover, add:**
+
+```python
+# Determine crossover direction
+crossover_direction = determine_crossover_direction(parsed_data)
+parsed_data["crossover_direction"] = crossover_direction
+
+# Update trend state
+update_trend_state(parsed_data, crossover_direction)
+
+# Check higher timeframe trend
+higher_tf_info = get_higher_timeframe_trend(
+    parsed_data.get('symbol'),
+    parsed_data.get('timeframe'),
+    f"{parsed_data.get('ema_short')}/{parsed_data.get('ema_long')}"
+)
+parsed_data["higher_tf_trend"] = higher_tf_info
+```
+
+### 4. Update Discord Alert Message
+
+**In `send_discord_alert()` function (around line 320), update message format:**
+
+```python
+# Format EMA pair for display
+ema_pair = "N/A"
+if parsed.get('ema_short') and parsed.get('ema_long'):
+    ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
+
+# Get crossover direction and higher TF info
+crossover_dir = parsed.get('crossover_direction', 'unknown').upper()
+higher_tf_info = parsed.get('higher_tf_trend')
+
+# Build message
+if higher_tf_info:
+    higher_tf = higher_tf_info['timeframe']
+    higher_trend = higher_tf_info['trend'].upper()
+    trend_match = "WITH" if higher_tf_info['trend'] == parsed.get('crossover_direction') else "AGAINST"
+    
+    message = f"""**EMA CROSSOVER - {ema_pair} ({crossover_dir})**
+**TICKER:** {parsed.get('symbol', 'N/A')}
+**TIME FRAME:** {parsed.get('timeframe', 'N/A')}
+**HIGHER TF:** {higher_tf} is {higher_trend} ({trend_match} TREND)
+**MARK:** ${parsed.get('price', 'N/A')}
+**TIME:** {display_time}"""
+else:
+    message = f"""**EMA CROSSOVER - {ema_pair} ({crossover_dir})**
+**TICKER:** {parsed.get('symbol', 'N/A')}
+**TIME FRAME:** {parsed.get('timeframe', 'N/A')}
+**MARK:** ${parsed.get('price', 'N/A')}
+**TIME:** {display_time}"""
+```
+
+### 5. Add API Endpoint to View Trend States
+
+**Add new endpoint before line 327:**
+
+```python
+@app.get("/trends")
+async def get_trends():
+    """Get current trend states for all tickers"""
+    return trend_states
+
+@app.get("/trends/{symbol}")
+async def get_ticker_trends(symbol: str):
+    """Get trend states for a specific ticker"""
+    return trend_states.get(symbol.upper(), {})
+```
+
+## Expected Behavior
+
+### Example 1: With Higher TF Alignment
+
+```
+**EMA CROSSOVER - 9/21 (BULLISH)**
+**TICKER:** SPY
+**TIME FRAME:** 15MIN
+**HIGHER TF:** 30MIN is BULLISH (WITH TREND)
+**MARK:** $668.59
+**TIME:** 09:08 PM
+```
+
+### Example 2: Against Higher TF
+
+```
+**EMA CROSSOVER - 9/21 (BEARISH)**
+**TICKER:** SPY
+**TIME FRAME:** 5MIN
+**HIGHER TF:** 15MIN is BULLISH (AGAINST TREND)
+**MARK:** $445.20
+**TIME:** 02:15 PM
+```
+
+### Example 3: No Higher TF Data Yet
+
+```
+**EMA CROSSOVER - 9/21 (BULLISH)**
+**TICKER:** QQQ
+**TIME FRAME:** 1DAY
+**MARK:** $385.20
+**TIME:** 09:10 PM
+```
+
+## Files Created
+
+- `trend_states.json` - Persistent storage of trend states (auto-created)
+
+## Key Features
+
+- Persistent storage survives restarts
+- Only updates when new crossover happens
+- Tracks each ticker/timeframe/EMA pair independently
+- Shows alignment with next higher timeframe
+- Easy to query via `/trends` API endpoint

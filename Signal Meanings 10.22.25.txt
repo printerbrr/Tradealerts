@@ -1,0 +1,24 @@
+Cyan/Magenta C#/P#
+THAT TF EMA Cross
+
+EXAMPLE: Cyan C30 = 30min EMA Cross
+EXAMPLE: Magenta P30 = 30min EMA Cross
+
+
+
+Cyan/Magneta CALL#/PUT#
+THAT TF EMA Cross WITH Higher TF TREND
+
+EXAMPLE: Cyan CALL15 = 15min EMA cross, 30min is Bullish
+EXAMPLE: Magenta PUT15 = 15min EMA cross, 30min is Bearish
+
+
+
+
+Green/Red Call#/Put#
+Lower TF MACD cross (0line) WITH TREND
+
+EXAMPLE: Green Call30 = 15min MACD Cross, 30min is bullish
+EXAMPLE: Red Put30 = 15min MACD cross, 30min is Bearish
+
+
