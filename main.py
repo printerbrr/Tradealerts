@@ -371,22 +371,14 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         parsed = log_data['parsed_data']
         
         # Simple, clean Discord message
-        # Use trigger time from SMS if available, otherwise current time
-        trigger_time = parsed.get('trigger_time')
-        if trigger_time:
-            # Extract time from trigger_time (format: "12/15/2024 14:30:00" or "10/22/25 21:08:48")
-            try:
-                from datetime import datetime
-                # Try 4-digit year first, then 2-digit year
-                try:
-                    dt = datetime.strptime(trigger_time, "%m/%d/%Y %H:%M:%S")
-                except ValueError:
-                    dt = datetime.strptime(trigger_time, "%m/%d/%y %H:%M:%S")
-                display_time = dt.strftime("%I:%M %p")
-            except:
-                display_time = datetime.now().strftime("%I:%M %p")
-        else:
-            display_time = datetime.now().strftime("%I:%M %p")
+        # Always use server receive time in PST/PDT (handles daylight savings automatically)
+        import pytz
+        from datetime import datetime
+        
+        # Get current time in Pacific timezone (handles PST/PDT automatically)
+        pacific = pytz.timezone('America/Los_Angeles')
+        server_time_pacific = datetime.now(pacific)
+        display_time = server_time_pacific.strftime("%I:%M %p")
             
         # Create different message formats based on alert type
         if parsed.get('action') == 'macd_crossover':
