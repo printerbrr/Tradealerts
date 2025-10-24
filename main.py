@@ -210,10 +210,27 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
         if price_match:
             parsed["price"] = float(price_match.group(1))
         
-        # Extract timeframe - handle "5MIN TF", "1DAY TF", "4HOUR TF", etc.
-        tf_match = re.search(r'(\d+(?:MIN|HOUR|DAY|MINUTE))\s*TF', message, re.IGNORECASE)
+        # Extract timeframe - handle all formats: 5MIN/5M, 15MIN/15M, 30MIN/30M, 1HR/1H/1HOUR, 2HR/2H/2HOUR, 4HR/4H/4HOUR, 1D/1DAY/1 DAY
+        tf_match = re.search(r'(\d+(?:\s+)?(?:MIN|M|HR|HOUR|H|DAY|D))\s*TF', message, re.IGNORECASE)
         if tf_match:
-            parsed["timeframe"] = tf_match.group(1).strip()
+            timeframe_raw = tf_match.group(1).strip().upper()
+            
+            # Normalize timeframe formats for consistent display
+            timeframe_map = {
+                'M': 'MIN',
+                'H': 'HR', 
+                'D': 'DAY'
+            }
+            
+            # Remove extra spaces first
+            timeframe_raw = re.sub(r'\s+', '', timeframe_raw)
+            
+            # Replace single letter abbreviations with full words
+            for abbrev, full in timeframe_map.items():
+                if timeframe_raw.endswith(abbrev) and len(timeframe_raw) > 1:
+                    timeframe_raw = timeframe_raw[:-1] + full
+            
+            parsed["timeframe"] = timeframe_raw
         
         # Extract EMA pair from "TF XXX" pattern (e.g., "5MIN TF 921" = 9/21 EMAs)
         ema_tf_match = re.search(r'TF\s*(\d{3,4})', message, re.IGNORECASE)
