@@ -103,20 +103,50 @@ async def receive_sms(request: Request):
             
             if '"message"' in body_str:
                 try:
-                    # Extract message content, handling multiline and escaped quotes
-                    msg_patterns = [
-                        r'"message"\s*:\s*"([^"]*(?:\\.[^"]*)*)"',
-                        r'"message"\s*:\s*"([^"]*)"'
-                    ]
-                    for pattern in msg_patterns:
-                        match = re.search(pattern, body_str, re.DOTALL)
-                        if match:
-                            message = match.group(1)
-                            # Clean up escaped characters
-                            message = message.replace('\\n', '\n').replace('\\"', '"').replace('\\t', '\t')
-                            break
-                except:
-                    pass
+                    # Improved message extraction to handle unescaped quotes and multiline content
+                    # First try to find the message field and extract everything until the next field or end
+                    msg_start_pattern = r'"message"\s*:\s*"'
+                    msg_start_match = re.search(msg_start_pattern, body_str)
+                    
+                    if msg_start_match:
+                        start_pos = msg_start_match.end()
+                        # Find the end of the message field by looking for the next field or closing brace
+                        # Handle both cases: message ends with quote followed by comma/brace, or multiline content
+                        
+                        # Try to find the end of the message field
+                        remaining_text = body_str[start_pos:]
+                        
+                        # Look for patterns that indicate end of message field
+                        end_patterns = [
+                            r'",\s*"[^"]*"\s*:',  # message ends with ", followed by another field
+                            r'",\s*}',            # message ends with ", followed by closing brace
+                            r'"\s*}',             # message ends with " followed by closing brace
+                            r'",\s*$',           # message ends with ", at end of string
+                            r'"\s*$'             # message ends with " at end of string
+                        ]
+                        
+                        message_end_pos = len(remaining_text)
+                        for pattern in end_patterns:
+                            end_match = re.search(pattern, remaining_text)
+                            if end_match:
+                                message_end_pos = end_match.start()
+                                break
+                        
+                        # Extract the message content
+                        message_content = remaining_text[:message_end_pos]
+                        
+                        # Clean up escaped characters and control characters
+                        message = message_content.replace('\\n', '\n').replace('\\"', '"').replace('\\t', '\t').replace('\\r', '\r')
+                        
+                        # Remove any remaining control characters that might cause issues
+                        message = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', message)
+                        
+                        logger.info(f"Extracted message from malformed JSON: {message[:100]}...")
+                        
+                except Exception as extract_error:
+                    logger.warning(f"Failed to extract message from malformed JSON: {extract_error}")
+                    # Keep the original body_str as fallback
+                    message = body_str
         
         logger.info(f"Received SMS from {sender}: {message}")
         
