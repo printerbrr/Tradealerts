@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -38,13 +39,22 @@ class AlertConfig(BaseModel):
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
 
-# Load Discord webhook URL from environment variable
+# Load Discord webhook URL from environment variable or config file
 discord_webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+
+# If not in environment, try to load from config file
+if not discord_webhook_url:
+    try:
+        with open("discord_config.txt", "r") as f:
+            discord_webhook_url = f.read().strip()
+    except FileNotFoundError:
+        pass
+
 if discord_webhook_url:
     alert_config.discord_webhook_url = discord_webhook_url
-    logger.info(f"Discord webhook URL loaded from environment: {discord_webhook_url[:50]}...")
+    logger.info(f"Discord webhook URL loaded: {discord_webhook_url[:50]}...")
 else:
-    logger.warning("DISCORD_WEBHOOK_URL environment variable not set")
+    logger.warning("DISCORD_WEBHOOK_URL not found in environment or config file")
 
 @app.get("/")
 async def root():
@@ -197,13 +207,23 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
         if study_match:
             parsed["study_details"] = study_match.group(1)
         
-        # Detect crossover signals - improved detection
-        crossover_keywords = [
-            "movingavgcrossover", "crossover", "ema cross", "moving average",
-            "length1", "length2", "exponential"
-        ]
+        # Detect MACD crossover signals first
+        macd_keywords = ["macdhistogramcrossover", "macd crossover", "macd cross"]
         
-        if any(keyword in message_lower for keyword in crossover_keywords):
+        if any(keyword in message_lower for keyword in macd_keywords):
+            parsed["action"] = "macd_crossover"
+            
+            # Extract MACD crossover direction
+            if "negative to positive" in message_lower:
+                parsed["macd_direction"] = "bullish"
+            elif "positive to negative" in message_lower:
+                parsed["macd_direction"] = "bearish"
+            else:
+                # Default to bullish if direction not specified
+                parsed["macd_direction"] = "bullish"
+        
+        # Detect EMA crossover signals - improved detection
+        elif any(keyword in message_lower for keyword in ["movingavgcrossover", "crossover", "ema cross", "moving average", "length1", "length2", "exponential"]):
             parsed["action"] = "moving_average_crossover"
             
             # Extract EMA details
@@ -266,14 +286,19 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
     Analyze parsed data against configured parameters
     Returns True if alert should be triggered
-    Focus: Crossover detection for tomorrow's trading
+    Focus: MACD and EMA Crossover detection for tomorrow's trading
     """
-    # Primary focus: Moving Average Crossover detection
-    if parsed_data.get("action") == "moving_average_crossover":
-        logger.info("CROSSOVER DETECTED! Triggering Discord alert")
+    # Primary focus: MACD Crossover detection
+    if parsed_data.get("action") == "macd_crossover":
+        logger.info("MACD CROSSOVER DETECTED! Triggering Discord alert")
         return True
     
-    # Secondary: High-confidence Schwab alerts
+    # Secondary focus: Moving Average Crossover detection
+    if parsed_data.get("action") == "moving_average_crossover":
+        logger.info("EMA CROSSOVER DETECTED! Triggering Discord alert")
+        return True
+    
+    # Tertiary: High-confidence Schwab alerts
     if parsed_data.get("alert_type") == "schwab_alert" and parsed_data.get("confidence") == "high":
         logger.info("HIGH CONFIDENCE SCHWAB ALERT! Triggering Discord alert")
         return True
@@ -316,12 +341,21 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         else:
             display_time = datetime.now().strftime("%I:%M %p")
             
-        # Format EMA pair for display
-        ema_pair = "N/A"
-        if parsed.get('ema_short') and parsed.get('ema_long'):
-            ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
+        # Create different message formats based on alert type
+        if parsed.get('action') == 'macd_crossover':
+            # MACD Crossover format
+            macd_direction = parsed.get('macd_direction', 'bullish').upper()
+            message = f"""**MACD CROSSOVER - {macd_direction}**
+**TIME FRAME:** {parsed.get('timeframe', 'N/A')}
+**MARK:** ${parsed.get('price', 'N/A')}
+**TIME:** {display_time}"""
+        else:
+            # EMA Crossover format (existing)
+            ema_pair = "N/A"
+            if parsed.get('ema_short') and parsed.get('ema_long'):
+                ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
 
-        message = f"""**EMA CROSSOVER - {ema_pair}**
+            message = f"""**EMA CROSSOVER - {ema_pair}**
 **TICKER:** {parsed.get('symbol', 'N/A')}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
