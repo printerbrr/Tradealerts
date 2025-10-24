@@ -7,6 +7,10 @@ import logging
 from datetime import datetime
 import json
 
+# Import state tracking modules
+from state_manager import state_manager
+from confluence_rules import confluence_rules
+
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,  # More verbose logging for development
@@ -61,6 +65,20 @@ if discord_webhook_url:
     logger.info(f"[DEV] Discord webhook URL loaded: {discord_webhook_url[:50]}...")
 else:
     logger.warning("[DEV] DISCORD_WEBHOOK_URL not found in environment or config file")
+
+# Initialize state tracking system
+try:
+    # Initialize database with development path
+    state_manager.database_path = DEV_DATABASE
+    state_manager.init_database()
+    logger.info(f"[DEV] State manager initialized with database: {DEV_DATABASE}")
+    
+    # Load confluence rules
+    confluence_rules.load_rules()
+    logger.info(f"[DEV] Confluence rules engine initialized")
+    
+except Exception as e:
+    logger.error(f"[DEV] Failed to initialize state tracking system: {e}")
 
 @app.get("/")
 async def root():
@@ -174,6 +192,9 @@ async def receive_sms(request: Request):
         }
         
         logger.info(f"[DEV] Parsed data: {json.dumps(log_data, indent=2)}")
+        
+        # Update system state based on detected crossovers
+        update_system_state(parsed_data)
         
         # Analyze the data and check for alerts
         if alert_config.enabled:
@@ -295,6 +316,15 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             elif "ema cross" in message_lower:
                 parsed["ema_short"] = 9  # Default for Schwab
                 parsed["ema_long"] = 21  # Default for Schwab
+            
+            # Extract EMA crossover direction
+            if "negative to positive" in message_lower:
+                parsed["ema_direction"] = "bullish"
+            elif "positive to negative" in message_lower:
+                parsed["ema_direction"] = "bearish"
+            else:
+                # Default to bullish if direction not specified
+                parsed["ema_direction"] = "bullish"
         
         # Set confidence based on study value
         if parsed["study_details"]:
@@ -341,6 +371,50 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
     
     return parsed
 
+def update_system_state(parsed_data: Dict[str, Any]):
+    """
+    Update timeframe state based on detected crossover
+    This function records EMA and MACD crossovers to maintain state tracking
+    """
+    try:
+        symbol = parsed_data.get('symbol', 'SPY')
+        timeframe = parsed_data.get('timeframe')
+        price = parsed_data.get('price')
+        
+        if not timeframe:
+            logger.warning(f"[DEV] No timeframe found for state update: {symbol}")
+            return
+        
+        # Update MACD crossover state
+        if parsed_data.get('action') == 'macd_crossover':
+            direction = parsed_data.get('macd_direction', 'unknown')
+            if direction in ['bullish', 'bearish']:
+                success = state_manager.update_timeframe_state(
+                    symbol, timeframe, 'macd', direction, price
+                )
+                if success:
+                    logger.info(f"[DEV] STATE UPDATE: {symbol} {timeframe} MACD -> {direction.upper()}")
+                else:
+                    logger.error(f"[DEV] Failed to update MACD state for {symbol} {timeframe}")
+        
+        # Update EMA crossover state
+        elif parsed_data.get('action') == 'moving_average_crossover':
+            direction = parsed_data.get('ema_direction', 'unknown')
+            if direction in ['bullish', 'bearish']:
+                success = state_manager.update_timeframe_state(
+                    symbol, timeframe, 'ema', direction, price
+                )
+                if success:
+                    logger.info(f"[DEV] STATE UPDATE: {symbol} {timeframe} EMA -> {direction.upper()}")
+                else:
+                    logger.error(f"[DEV] Failed to update EMA state for {symbol} {timeframe}")
+        
+        else:
+            logger.debug(f"[DEV] No state update needed for action: {parsed_data.get('action')}")
+            
+    except Exception as e:
+        logger.error(f"[DEV] Error updating system state: {e}")
+
 def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
     Analyze parsed data against configured parameters
@@ -358,6 +432,14 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
     if 13 <= current_hour or current_hour < 5:
         logger.info(f"[DEV] ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+        return False
+    
+    # Check confluence rules before sending alerts
+    symbol = parsed_data.get('symbol', 'SPY')
+    current_states = state_manager.get_all_states(symbol)
+    
+    if not confluence_rules.evaluate_alert(parsed_data, current_states):
+        logger.info(f"[DEV] ALERT FILTERED: Confluence requirements not met for {symbol}")
         return False
     
     # Primary focus: MACD Crossover detection

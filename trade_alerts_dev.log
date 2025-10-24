@@ -26,3 +26,73 @@
   }
 }
 2025-10-24 14:50:59,528 - __main__ - INFO - [DEV] ALERT FILTERED: Current time 02:50 PM is outside alert hours (5 AM - 1 PM PST/PDT)
+2025-10-24 14:53:46,872 - __main__ - INFO - [DEV] Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 14:53:46,879 - state_manager - INFO - [DEV] Database initialized: market_states_dev.db
+2025-10-24 14:53:46,879 - __main__ - INFO - [DEV] State manager initialized with database: market_states_dev.db
+2025-10-24 14:53:46,880 - confluence_rules - ERROR - [DEV] Failed to load confluence rules: name 'os' is not defined
+2025-10-24 14:53:46,880 - __main__ - INFO - [DEV] Confluence rules engine initialized
+2025-10-24 14:53:46,926 - __main__ - INFO - ============================================================
+2025-10-24 14:53:46,926 - __main__ - INFO - STARTING DEVELOPMENT VERSION
+2025-10-24 14:53:46,926 - __main__ - INFO - Port: 8001
+2025-10-24 14:53:46,926 - __main__ - INFO - Database: market_states_dev.db
+2025-10-24 14:53:46,926 - __main__ - INFO - Log File: trade_alerts_dev.log
+2025-10-24 14:53:46,926 - __main__ - INFO - ============================================================
+2025-10-24 14:53:46,929 - asyncio - DEBUG - Using proactor: IocpProactor
+2025-10-24 14:54:08,595 - __main__ - INFO - [DEV] Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-24 14:54:08,596 - state_manager - INFO - [DEV] Database initialized: market_states_dev.db
+2025-10-24 14:54:08,596 - __main__ - INFO - [DEV] State manager initialized with database: market_states_dev.db
+2025-10-24 14:54:08,596 - confluence_rules - INFO - [DEV] Loaded 5 confluence rules from confluence_rules.json
+2025-10-24 14:54:08,596 - __main__ - INFO - [DEV] Confluence rules engine initialized
+2025-10-24 14:54:08,637 - __main__ - INFO - ============================================================
+2025-10-24 14:54:08,637 - __main__ - INFO - STARTING DEVELOPMENT VERSION
+2025-10-24 14:54:08,637 - __main__ - INFO - Port: 8001
+2025-10-24 14:54:08,637 - __main__ - INFO - Database: market_states_dev.db
+2025-10-24 14:54:08,637 - __main__ - INFO - Log File: trade_alerts_dev.log
+2025-10-24 14:54:08,637 - __main__ - INFO - ============================================================
+2025-10-24 14:54:08,640 - asyncio - DEBUG - Using proactor: IocpProactor
+2025-10-24 14:54:18,542 - __main__ - INFO - Raw request body: b'{"sender": "Test", "message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE"}'
+2025-10-24 14:54:18,542 - __main__ - INFO - [DEV] Received SMS from Test: Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE
+2025-10-24 14:54:18,543 - __main__ - INFO - [DEV] Parsed data: {
+  "timestamp": "2025-10-24T14:54:18.543007",
+  "sender": "Test",
+  "original_message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE",
+  "parsed_data": {
+    "raw_message": "Schwab: ALERT ON SPY WHEN MACDHistogramCrossover(crossing type = Negative to Positive) is true;5m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 5MIN TF MACD NEGATIVE TO POSITIVE",
+    "symbol": "SPY",
+    "price": 678.25,
+    "action": "macd_crossover",
+    "confidence": "unknown",
+    "timeframe": "5MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/24/25 10:46:06",
+    "study_details": "1.00.",
+    "macd_direction": "bullish"
+  }
+}
+2025-10-24 14:54:24,115 - state_manager - ERROR - [DEV] Failed to log state change: database is locked
+2025-10-24 14:54:24,121 - state_manager - INFO - [DEV] STATE UPDATE: SPY 5MIN MACD: UNKNOWN -> BULLISH (price: $678.25)
+2025-10-24 14:54:24,121 - __main__ - INFO - [DEV] STATE UPDATE: SPY 5MIN MACD -> BULLISH
+2025-10-24 14:54:24,189 - __main__ - INFO - [DEV] ALERT FILTERED: Current time 02:54 PM is outside alert hours (5 AM - 1 PM PST/PDT)
+2025-10-24 14:54:35,118 - __main__ - INFO - Raw request body: b'{"sender": "Test", "message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true;15m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 15MIN TF EMA NEGATIVE TO POSITIVE"}'
+2025-10-24 14:54:35,118 - __main__ - INFO - [DEV] Received SMS from Test: Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true;15m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 15MIN TF EMA NEGATIVE TO POSITIVE
+2025-10-24 14:54:35,118 - __main__ - INFO - [DEV] Parsed data: {
+  "timestamp": "2025-10-24T14:54:35.118746",
+  "sender": "Test",
+  "original_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true;15m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 15MIN TF EMA NEGATIVE TO POSITIVE",
+  "parsed_data": {
+    "raw_message": "Schwab: ALERT ON SPY WHEN MovingAvgCrossover(length1 = 9, length2 = 21) is true;15m IS TRUE SUBMIT AT 10/24/25 10:46:06 is triggered MARK = 678.25; STUDY = 1.00. 15MIN TF EMA NEGATIVE TO POSITIVE",
+    "symbol": "SPY",
+    "price": 678.25,
+    "action": "moving_average_crossover",
+    "confidence": "unknown",
+    "timeframe": "15MIN",
+    "alert_type": "schwab_alert",
+    "trigger_time": "10/24/25 10:46:06",
+    "study_details": "1.00.",
+    "ema_direction": "bullish"
+  }
+}
+2025-10-24 14:54:40,676 - state_manager - ERROR - [DEV] Failed to log state change: database is locked
+2025-10-24 14:54:40,683 - state_manager - INFO - [DEV] STATE UPDATE: SPY 15MIN EMA: UNKNOWN -> BULLISH (price: $678.25)
+2025-10-24 14:54:40,683 - __main__ - INFO - [DEV] STATE UPDATE: SPY 15MIN EMA -> BULLISH
+2025-10-24 14:54:40,683 - __main__ - INFO - [DEV] ALERT FILTERED: Current time 02:54 PM is outside alert hours (5 AM - 1 PM PST/PDT)

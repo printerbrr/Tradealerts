@@ -1,0 +1,83 @@
+{
+  "rules": [
+    {
+      "name": "MACD confluence with next higher EMA",
+      "enabled": true,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "macd",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "next_higher",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "ALLOW"
+    },
+    {
+      "name": "EMA confluence with next higher EMA",
+      "enabled": true,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "ema",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "next_higher",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "ALLOW"
+    },
+    {
+      "name": "Block 5MIN alerts without 15MIN EMA confluence",
+      "enabled": false,
+      "trigger": {
+        "timeframe": "5MIN",
+        "crossover_type": "any",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "15MIN",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "BLOCK"
+    },
+    {
+      "name": "Block 15MIN alerts without 30MIN EMA confluence",
+      "enabled": false,
+      "trigger": {
+        "timeframe": "15MIN",
+        "crossover_type": "any",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "30MIN",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "BLOCK"
+    },
+    {
+      "name": "Block all alerts without confluence",
+      "enabled": false,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "any",
+        "direction": "any"
+      },
+      "requirements": [],
+      "action": "BLOCK"
+    }
+  ]
+}
