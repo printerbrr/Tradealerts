@@ -7,12 +7,16 @@ import logging
 from datetime import datetime
 import json
 
+# Import state tracking modules
+from state_manager import state_manager
+from confluence_rules import confluence_rules
+
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO,  # Production logging level
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('trade_alerts.log'),
+        logging.FileHandler('trade_alerts.log'),  # Production log file
         logging.StreamHandler()
     ]
 )
@@ -20,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Trade Alerts SMS Parser",
-    description="A lean SMS-based trade alerting system",
-    version="1.0.0"
+    description="A lean SMS-based trade alerting system with enhanced state management",
+    version="2.0.0"
 )
 
 # Data models
@@ -38,6 +42,12 @@ class AlertConfig(BaseModel):
 
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
+
+# Production settings
+PRODUCTION_MODE = True
+PRODUCTION_PORT = 8000
+PRODUCTION_DATABASE = "market_states.db"
+PRODUCTION_LOG_FILE = "trade_alerts.log"
 
 # Load Discord webhook URL from environment variable or config file
 discord_webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -56,9 +66,28 @@ if discord_webhook_url:
 else:
     logger.warning("DISCORD_WEBHOOK_URL not found in environment or config file")
 
+# Initialize state tracking system
+try:
+    # Initialize database with production path
+    state_manager.database_path = PRODUCTION_DATABASE
+    state_manager.init_database()
+    logger.info(f"State manager initialized with database: {PRODUCTION_DATABASE}")
+    
+    # Load confluence rules
+    confluence_rules.load_rules()
+    logger.info(f"Confluence rules engine initialized")
+    
+except Exception as e:
+    logger.error(f"Failed to initialize state tracking system: {e}")
+
 @app.get("/")
 async def root():
-    return {"message": "Trade Alerts SMS Parser is running", "status": "healthy"}
+    return {
+        "message": "Trade Alerts SMS Parser", 
+        "status": "healthy",
+        "version": "2.0.0",
+        "mode": "production"
+    }
 
 @app.post("/webhook/sms")
 async def receive_sms(request: Request):
@@ -162,6 +191,9 @@ async def receive_sms(request: Request):
         }
         
         logger.info(f"Parsed data: {json.dumps(log_data, indent=2)}")
+        
+        # Update system state based on detected crossovers
+        update_system_state(parsed_data)
         
         # Analyze the data and check for alerts
         if alert_config.enabled:
@@ -283,6 +315,15 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             elif "ema cross" in message_lower:
                 parsed["ema_short"] = 9  # Default for Schwab
                 parsed["ema_long"] = 21  # Default for Schwab
+            
+            # Extract EMA crossover direction
+            if "negative to positive" in message_lower or "bullish" in message_lower:
+                parsed["ema_direction"] = "bullish"
+            elif "positive to negative" in message_lower or "bearish" in message_lower:
+                parsed["ema_direction"] = "bearish"
+            else:
+                # Default to bullish if direction not specified
+                parsed["ema_direction"] = "bullish"
         
         # Set confidence based on study value
         if parsed["study_details"]:
@@ -329,6 +370,68 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
     
     return parsed
 
+def update_system_state(parsed_data: Dict[str, Any]):
+    """
+    Update timeframe state based on detected crossover
+    This function records EMA and MACD crossovers to maintain state tracking
+    Checks current status and only updates if different
+    """
+    try:
+        symbol = parsed_data.get('symbol', 'SPY')
+        timeframe = parsed_data.get('timeframe')
+        price = parsed_data.get('price')
+        
+        if not timeframe:
+            logger.warning(f"No timeframe found for state update: {symbol}")
+            return
+        
+        # Get current state for this symbol/timeframe
+        current_state = state_manager.get_timeframe_state(symbol, timeframe)
+        
+        # Update MACD crossover state
+        if parsed_data.get('action') == 'macd_crossover':
+            direction = parsed_data.get('macd_direction', 'unknown')
+            if direction in ['bullish', 'bearish']:
+                # Check if current MACD status is different
+                current_macd_status = current_state.get('macd_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+                
+                if current_macd_status != direction.upper():
+                    logger.info(f"MACD STATUS CHANGE DETECTED: {symbol} {timeframe} MACD {current_macd_status} -> {direction.upper()}")
+                    success = state_manager.update_timeframe_state(
+                        symbol, timeframe, 'macd', direction, price
+                    )
+                    if success:
+                        logger.info(f"STATE UPDATE: {symbol} {timeframe} MACD -> {direction.upper()}")
+                    else:
+                        logger.error(f"Failed to update MACD state for {symbol} {timeframe}")
+                else:
+                    logger.info(f"MACD STATUS UNCHANGED: {symbol} {timeframe} MACD already {direction.upper()}")
+        
+        # Update EMA crossover state
+        elif parsed_data.get('action') == 'moving_average_crossover':
+            direction = parsed_data.get('ema_direction', 'unknown')
+            if direction in ['bullish', 'bearish']:
+                # Check if current EMA status is different
+                current_ema_status = current_state.get('ema_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+                
+                if current_ema_status != direction.upper():
+                    logger.info(f"EMA STATUS CHANGE DETECTED: {symbol} {timeframe} EMA {current_ema_status} -> {direction.upper()}")
+                    success = state_manager.update_timeframe_state(
+                        symbol, timeframe, 'ema', direction, price
+                    )
+                    if success:
+                        logger.info(f"STATE UPDATE: {symbol} {timeframe} EMA -> {direction.upper()}")
+                    else:
+                        logger.error(f"Failed to update EMA state for {symbol} {timeframe}")
+                else:
+                    logger.info(f"EMA STATUS UNCHANGED: {symbol} {timeframe} EMA already {direction.upper()}")
+        
+        else:
+            logger.debug(f"No state update needed for action: {parsed_data.get('action')}")
+            
+    except Exception as e:
+        logger.error(f"Error updating system state: {e}")
+
 def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
     Analyze parsed data against configured parameters
@@ -346,6 +449,14 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
     if 13 <= current_hour or current_hour < 5:
         logger.info(f"ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+        return False
+    
+    # Check confluence rules before sending alerts
+    symbol = parsed_data.get('symbol', 'SPY')
+    current_states = state_manager.get_all_states(symbol)
+    
+    if not confluence_rules.evaluate_alert(parsed_data, current_states):
+        logger.info(f"ALERT FILTERED: Confluence requirements not met for {symbol}")
         return False
     
     # Primary focus: MACD Crossover detection
@@ -406,8 +517,11 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             ema_pair = "N/A"
             if parsed.get('ema_short') and parsed.get('ema_long'):
                 ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
+            
+            # Add direction to EMA crossover message
+            ema_direction = parsed.get('ema_direction', 'bullish').upper()
 
-            message = f"""**EMA CROSSOVER - {ema_pair}**
+            message = f"""**EMA CROSSOVER - {ema_pair} - {ema_direction}**
 **TICKER:** {parsed.get('symbol', 'N/A')}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
@@ -447,5 +561,15 @@ async def update_config(config: AlertConfig):
 if __name__ == "__main__":
     import uvicorn
     import os
-    port = int(os.environ.get("PORT", 8000))
+    
+    # Production startup
+    logger.info("=" * 60)
+    logger.info("STARTING TRADE ALERTS SYSTEM v2.0")
+    logger.info(f"Port: {PRODUCTION_PORT}")
+    logger.info(f"Database: {PRODUCTION_DATABASE}")
+    logger.info(f"Log File: {PRODUCTION_LOG_FILE}")
+    logger.info("=" * 60)
+    
+    # Use production port, fallback to environment variable
+    port = int(os.environ.get("PORT", PRODUCTION_PORT))
     uvicorn.run(app, host="0.0.0.0", port=port)
