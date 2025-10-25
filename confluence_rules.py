@@ -27,14 +27,14 @@ class ConfluenceRulesEngine:
                 with open(self.rules_file, 'r') as f:
                     config = json.load(f)
                     self.rules = config.get('rules', [])
-                logger.info(f"[DEV] Loaded {len(self.rules)} confluence rules from {self.rules_file}")
+                logger.info(f"Loaded {len(self.rules)} confluence rules from {self.rules_file}")
             else:
                 # Create default rules if file doesn't exist
                 self.create_default_rules()
-                logger.info(f"[DEV] Created default confluence rules file: {self.rules_file}")
+                logger.info(f"Created default confluence rules file: {self.rules_file}")
                 
         except Exception as e:
-            logger.error(f"[DEV] Failed to load confluence rules: {e}")
+            logger.error(f"Failed to load confluence rules: {e}")
             self.rules = []
     
     def create_default_rules(self):
@@ -43,7 +43,7 @@ class ConfluenceRulesEngine:
             "rules": [
                 {
                     "name": "MACD confluence with next higher EMA",
-                    "enabled": True,
+                    "enabled": False,  # Disabled by default for easier testing
                     "trigger": {
                         "timeframe": "any",
                         "crossover_type": "macd",
@@ -60,7 +60,7 @@ class ConfluenceRulesEngine:
                 },
                 {
                     "name": "EMA confluence with next higher EMA",
-                    "enabled": True,
+                    "enabled": False,  # Disabled by default for easier testing
                     "trigger": {
                         "timeframe": "any",
                         "crossover_type": "ema",
@@ -77,7 +77,7 @@ class ConfluenceRulesEngine:
                 },
                 {
                     "name": "Block alerts without confluence",
-                    "enabled": False,
+                    "enabled": False,  # Disabled by default
                     "trigger": {
                         "timeframe": "any",
                         "crossover_type": "any",
@@ -94,7 +94,7 @@ class ConfluenceRulesEngine:
                 json.dump(default_rules, f, indent=2)
             self.rules = default_rules['rules']
         except Exception as e:
-            logger.error(f"[DEV] Failed to create default rules file: {e}")
+            logger.error(f"Failed to create default rules file: {e}")
             self.rules = []
     
     def reload_rules(self):
@@ -160,10 +160,10 @@ class ConfluenceRulesEngine:
             applicable_rules = self.get_applicable_rules(parsed_data)
             
             if not applicable_rules:
-                logger.info(f"[DEV] CONFLUENCE CHECK: No applicable rules for {symbol} - ALLOWING alert")
+                logger.info(f"CONFLUENCE CHECK: No applicable rules for {symbol} - ALLOWING alert")
                 return True
             
-            logger.info(f"[DEV] CONFLUENCE CHECK: Evaluating {len(applicable_rules)} rules for {symbol}")
+            logger.info(f"CONFLUENCE CHECK: Evaluating {len(applicable_rules)} rules for {symbol}")
             
             for rule in applicable_rules:
                 rule_name = rule.get('name', 'Unnamed Rule')
@@ -172,17 +172,17 @@ class ConfluenceRulesEngine:
                 
                 # Check if all requirements are met
                 if self._check_rule_requirements(rule, parsed_data, current_states):
-                    logger.info(f"[DEV] CONFLUENCE CHECK: Rule '{rule_name}' PASSED - Action: {action}")
+                    logger.info(f"CONFLUENCE CHECK: Rule '{rule_name}' PASSED - Action: {action}")
                     return action == 'ALLOW'
                 else:
-                    logger.info(f"[DEV] CONFLUENCE CHECK: Rule '{rule_name}' FAILED")
+                    logger.info(f"CONFLUENCE CHECK: Rule '{rule_name}' FAILED")
             
             # If no rules passed, default behavior depends on configuration
-            logger.info(f"[DEV] CONFLUENCE CHECK: No rules passed - defaulting to BLOCK")
+            logger.info(f"CONFLUENCE CHECK: No rules passed - defaulting to BLOCK")
             return False
             
         except Exception as e:
-            logger.error(f"[DEV] Failed to evaluate confluence rules: {e}")
+            logger.error(f"Failed to evaluate confluence rules: {e}")
             return True  # Default to allowing alerts if evaluation fails
     
     def _check_rule_requirements(self, rule: Dict[str, Any], parsed_data: Dict[str, Any], 
@@ -210,14 +210,14 @@ class ConfluenceRulesEngine:
                 current_timeframe = parsed_data.get('timeframe', '').upper()
                 timeframe = state_manager.get_next_higher_timeframe(current_timeframe)
                 if not timeframe:
-                    logger.info(f"[DEV] CONFLUENCE CHECK: No higher timeframe for {current_timeframe}")
+                    logger.info(f"CONFLUENCE CHECK: No higher timeframe for {current_timeframe}")
                     return False
             
             # Get the state for the required timeframe
             if timeframe in current_states:
                 state = current_states[timeframe]
             else:
-                logger.info(f"[DEV] CONFLUENCE CHECK: No state found for {symbol} {timeframe}")
+                logger.info(f"CONFLUENCE CHECK: No state found for {symbol} {timeframe}")
                 return False
             
             # Get the current status based on check_type
@@ -226,7 +226,7 @@ class ConfluenceRulesEngine:
             elif check_type == 'macd_status':
                 current_status = state.get('macd_status', 'UNKNOWN')
             else:
-                logger.warning(f"[DEV] CONFLUENCE CHECK: Unknown check_type: {check_type}")
+                logger.warning(f"CONFLUENCE CHECK: Unknown check_type: {check_type}")
                 return False
             
             # Check if status matches requirement
@@ -238,12 +238,12 @@ class ConfluenceRulesEngine:
             
             result = current_status == required_status
             
-            logger.info(f"[DEV] CONFLUENCE CHECK: {symbol} {timeframe} {check_type} is {current_status}, required: {required_status} - {'PASS' if result else 'FAIL'}")
+            logger.info(f"CONFLUENCE CHECK: {symbol} {timeframe} {check_type} is {current_status}, required: {required_status} - {'PASS' if result else 'FAIL'}")
             
             return result
             
         except Exception as e:
-            logger.error(f"[DEV] Failed to check single requirement: {e}")
+            logger.error(f"Failed to check single requirement: {e}")
             return False
     
     def get_rule_summary(self) -> Dict[str, Any]:

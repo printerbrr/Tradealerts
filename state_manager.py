@@ -275,7 +275,7 @@ class StateManager:
                 conn.commit()
                 
         except Exception as e:
-            logger.error(f"[DEV] Failed to log state change: {e}")
+            logger.error(f"Failed to log state change: {e}")
     
     def get_next_higher_timeframe(self, current_timeframe: str) -> Optional[str]:
         """Get the next higher timeframe in the hierarchy"""
