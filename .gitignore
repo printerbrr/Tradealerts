@@ -1,0 +1,36 @@
+# Sensitive configuration files
+discord_config.txt
+discord_webhooks.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# Databases
+*.db
+market_states*.db
+
+# Logs
+*.log
+trade_alerts*.log
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+

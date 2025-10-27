@@ -10,6 +10,7 @@ import json
 # Import state tracking modules
 from state_manager import state_manager
 from confluence_rules import confluence_rules
+from webhook_manager import webhook_manager
 
 # Configure logging
 logging.basicConfig(
@@ -76,6 +77,10 @@ try:
     # Load confluence rules
     confluence_rules.load_rules()
     logger.info(f"Confluence rules engine initialized")
+    
+    # Initialize webhook manager (will auto-create config if needed)
+    webhook_manager.load_webhooks()
+    logger.info(f"Webhook manager initialized")
     
 except Exception as e:
     logger.error(f"Failed to initialize state tracking system: {e}")
@@ -483,16 +488,20 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
 
 async def send_discord_alert(log_data: Dict[str, Any]):
     """
-    Send alert to Discord webhook
+    Send alert to Discord webhook based on symbol
     """
-    if not alert_config.discord_webhook_url:
-        logger.warning("Discord webhook URL not configured")
-        return
-    
     try:
         import requests
         
         parsed = log_data['parsed_data']
+        symbol = parsed.get('symbol', 'SPY').upper()
+        
+        # Get webhook URL for this symbol
+        webhook_url = webhook_manager.get_webhook(symbol)
+        
+        if not webhook_url:
+            logger.warning(f"No Discord webhook configured for {symbol}")
+            return
         
         # Simple, clean Discord message
         # Always use server receive time in PST/PDT (handles daylight savings automatically)
@@ -509,6 +518,7 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             # MACD Crossover format
             macd_direction = parsed.get('macd_direction', 'bullish').upper()
             message = f"""**MACD CROSSOVER - {macd_direction}**
+**TICKER:** {symbol}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
 **TIME:** {display_time}"""
@@ -522,7 +532,7 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             ema_direction = parsed.get('ema_direction', 'bullish').upper()
 
             message = f"""**EMA CROSSOVER - {ema_pair} - {ema_direction}**
-**TICKER:** {parsed.get('symbol', 'N/A')}
+**TICKER:** {symbol}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
 **TIME:** {display_time}"""
@@ -532,13 +542,13 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         }
         
         response = requests.post(
-            alert_config.discord_webhook_url,
+            webhook_url,
             json=payload,
             headers={"Content-Type": "application/json"}
         )
         
         if response.status_code == 204:
-            logger.info("Discord alert sent successfully")
+            logger.info(f"Discord alert sent to {symbol} webhook successfully")
         else:
             logger.error(f"Failed to send Discord alert: {response.status_code}")
             
@@ -557,6 +567,117 @@ async def update_config(config: AlertConfig):
     alert_config = config
     logger.info(f"Configuration updated: {config}")
     return {"status": "success", "message": "Configuration updated"}
+
+# Confluence Rules Management Endpoints
+@app.get("/confluence/rules")
+async def get_confluence_rules():
+    """Get current confluence rules configuration"""
+    summary = confluence_rules.get_rule_summary()
+    return summary
+
+@app.get("/confluence/rules/{rule_index}")
+async def get_rule_details(rule_index: int):
+    """Get details about a specific rule by index"""
+    if 0 <= rule_index < len(confluence_rules.rules):
+        return confluence_rules.rules[rule_index]
+    raise HTTPException(status_code=404, detail="Rule not found")
+
+@app.post("/confluence/rules/{rule_index}/enable")
+async def enable_rule(rule_index: int):
+    """Enable a confluence rule"""
+    if 0 <= rule_index < len(confluence_rules.rules):
+        confluence_rules.rules[rule_index]['enabled'] = True
+        confluence_rules.save_rules()
+        rule_name = confluence_rules.rules[rule_index].get('name', f'Rule {rule_index}')
+        logger.info(f"Enabled confluence rule: {rule_name}")
+        return {"status": "success", "message": f"Rule '{rule_name}' enabled"}
+    raise HTTPException(status_code=404, detail="Rule not found")
+
+@app.post("/confluence/rules/{rule_index}/disable")
+async def disable_rule(rule_index: int):
+    """Disable a confluence rule"""
+    if 0 <= rule_index < len(confluence_rules.rules):
+        confluence_rules.rules[rule_index]['enabled'] = False
+        confluence_rules.save_rules()
+        rule_name = confluence_rules.rules[rule_index].get('name', f'Rule {rule_index}')
+        logger.info(f"Disabled confluence rule: {rule_name}")
+        return {"status": "success", "message": f"Rule '{rule_name}' disabled"}
+    raise HTTPException(status_code=404, detail="Rule not found")
+
+@app.post("/confluence/rules/reload")
+async def reload_rules():
+    """Reload confluence rules from file"""
+    confluence_rules.reload_rules()
+    logger.info("Confluence rules reloaded from file")
+    return {"status": "success", "message": "Rules reloaded successfully"}
+
+# Webhook Management Endpoints
+@app.get("/webhooks")
+async def get_webhooks():
+    """Get all configured webhooks"""
+    config = webhook_manager.get_config()
+    return config
+
+@app.get("/webhooks/{symbol}")
+async def get_symbol_webhook(symbol: str):
+    """Get webhook URL for a specific symbol"""
+    webhook_url = webhook_manager.get_webhook(symbol)
+    if webhook_url:
+        # Don't expose full URL in response for security
+        masked_url = f"{webhook_url[:50]}..." if len(webhook_url) > 50 else webhook_url
+        return {
+            "symbol": symbol.upper(),
+            "webhook_configured": True,
+            "webhook_preview": masked_url
+        }
+    return {"symbol": symbol.upper(), "webhook_configured": False}
+
+@app.post("/webhooks/{symbol}")
+async def set_symbol_webhook(symbol: str, request: Request):
+    """Set or update webhook URL for a symbol"""
+    symbol_upper = symbol.upper()
+    
+    try:
+        data = await request.json()
+        webhook_url = data.get('webhook_url', '').strip()
+    except:
+        webhook_url = ""
+    
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="webhook_url is required in request body")
+    
+    was_existing = webhook_manager.update_webhook(symbol_upper, webhook_url)
+    
+    if was_existing:
+        logger.info(f"Updated webhook for {symbol_upper}")
+        return {"status": "success", "message": f"Webhook updated for {symbol_upper}"}
+    else:
+        logger.info(f"Added new webhook for {symbol_upper}")
+        return {"status": "success", "message": f"Webhook added for {symbol_upper}"}
+
+@app.delete("/webhooks/{symbol}")
+async def delete_symbol_webhook(symbol: str):
+    """Remove webhook for a symbol"""
+    symbol_upper = symbol.upper()
+    
+    if symbol_upper == "DEFAULT":
+        raise HTTPException(status_code=400, detail="Cannot delete default webhook")
+    
+    if webhook_manager.remove_webhook(symbol_upper):
+        logger.info(f"Removed webhook for {symbol_upper}")
+        return {"status": "success", "message": f"Webhook removed for {symbol_upper}"}
+    else:
+        raise HTTPException(status_code=404, detail=f"No webhook configured for {symbol_upper}")
+
+@app.get("/symbols")
+async def get_tracked_symbols():
+    """Get list of all tracked symbols"""
+    symbols = webhook_manager.get_all_symbols()
+    return {
+        "symbols": symbols,
+        "total": len(symbols),
+        "has_default": "default" in webhook_manager.webhooks
+    }
 
 if __name__ == "__main__":
     import uvicorn

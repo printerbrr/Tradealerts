@@ -101,6 +101,16 @@ class ConfluenceRulesEngine:
         """Reload rules from file (useful for runtime updates)"""
         self.load_rules()
     
+    def save_rules(self):
+        """Save rules to JSON file"""
+        try:
+            config = {'rules': self.rules}
+            with open(self.rules_file, 'w') as f:
+                json.dump(config, f, indent=2)
+            logger.info(f"Saved {len(self.rules)} confluence rules to {self.rules_file}")
+        except Exception as e:
+            logger.error(f"Failed to save confluence rules: {e}")
+    
     def get_applicable_rules(self, parsed_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Find rules that apply to the current alert"""
         applicable_rules = []
