@@ -517,7 +517,8 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         if parsed.get('action') == 'macd_crossover':
             # MACD Crossover format
             macd_direction = parsed.get('macd_direction', 'bullish').upper()
-            message = f"""**MACD CROSSOVER - {macd_direction}**
+            message = f"""@everyone
+**MACD CROSSOVER - {macd_direction}**
 **TICKER:** {symbol}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
@@ -531,7 +532,8 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             # Add direction to EMA crossover message
             ema_direction = parsed.get('ema_direction', 'bullish').upper()
 
-            message = f"""**EMA CROSSOVER - {ema_pair} - {ema_direction}**
+            message = f"""@everyone
+**EMA CROSSOVER - {ema_pair} - {ema_direction}**
 **TICKER:** {symbol}
 **TIME FRAME:** {parsed.get('timeframe', 'N/A')}
 **MARK:** ${parsed.get('price', 'N/A')}
