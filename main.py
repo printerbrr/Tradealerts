@@ -458,17 +458,21 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     Focus: MACD and EMA Crossover detection for tomorrow's trading
     """
     # Check if we should send alerts based on time (1 PM - 4:59 AM PST/PDT = no alerts)
-    import pytz
-    from datetime import datetime
-    
-    pacific = pytz.timezone('America/Los_Angeles')
-    current_time_pacific = datetime.now(pacific)
-    current_hour = current_time_pacific.hour
-    
-    # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
-    if 13 <= current_hour or current_hour < 5:
-        logger.info(f"ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
-        return False
+    # Allow bypass via config for after-hours testing
+    if not alert_config.parameters.get('ignore_time_filter', False):
+        import pytz
+        from datetime import datetime
+        
+        pacific = pytz.timezone('America/Los_Angeles')
+        current_time_pacific = datetime.now(pacific)
+        current_hour = current_time_pacific.hour
+        
+        # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
+        if 13 <= current_hour or current_hour < 5:
+            logger.info(f"ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+            return False
+    else:
+        logger.info("Time filter bypassed via config (ignore_time_filter=true)")
     
     # Check confluence rules before sending alerts
     symbol = parsed_data.get('symbol', 'SPY')
