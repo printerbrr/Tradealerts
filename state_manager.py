@@ -13,7 +13,7 @@ import os
 logger = logging.getLogger(__name__)
 
 # Timeframe hierarchy for confluence checking
-TIMEFRAME_HIERARCHY = ["5MIN", "15MIN", "30MIN", "1HR", "2HR", "4HR", "1DAY"]
+TIMEFRAME_HIERARCHY = ["1MIN", "5MIN", "15MIN", "30MIN", "1HR", "2HR", "4HR", "1DAY"]
 
 class StateManager:
     """Manages timeframe state persistence using SQLite database"""
@@ -257,14 +257,15 @@ class StateManager:
                     WHERE symbol = ?
                     ORDER BY 
                         CASE timeframe
-                            WHEN '5MIN' THEN 1
-                            WHEN '15MIN' THEN 2
-                            WHEN '30MIN' THEN 3
-                            WHEN '1HR' THEN 4
-                            WHEN '2HR' THEN 5
-                            WHEN '4HR' THEN 6
-                            WHEN '1DAY' THEN 7
-                            ELSE 8
+                            WHEN '1MIN' THEN 1
+                            WHEN '5MIN' THEN 2
+                            WHEN '15MIN' THEN 3
+                            WHEN '30MIN' THEN 4
+                            WHEN '1HR' THEN 5
+                            WHEN '2HR' THEN 6
+                            WHEN '4HR' THEN 7
+                            WHEN '1DAY' THEN 8
+                            ELSE 9
                         END
                 ''', (symbol,))
                 

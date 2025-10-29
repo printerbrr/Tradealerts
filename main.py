@@ -124,83 +124,151 @@ async def receive_sms(request: Request):
         body = await request.body()
         logger.info(f"Raw request body: {body}")
         
+        # Decode body string first
+        body_str = body.decode('utf-8', errors='ignore')
+        
+        # Try to fix JSON by escaping unescaped newlines and control characters in string values
+        # This handles cases where the JSON contains literal newlines instead of \n
+        def fix_json_strings(json_str: str) -> str:
+            """Fix JSON by properly escaping control characters in string values"""
+            result = []
+            in_string = False
+            escape_next = False
+            i = 0
+            
+            while i < len(json_str):
+                char = json_str[i]
+                
+                if escape_next:
+                    result.append(char)
+                    escape_next = False
+                    i += 1
+                    continue
+                
+                if char == '\\':
+                    escape_next = True
+                    result.append(char)
+                    i += 1
+                    continue
+                
+                if char == '"' and (i == 0 or json_str[i-1] != '\\'):
+                    in_string = not in_string
+                    result.append(char)
+                    i += 1
+                    continue
+                
+                if in_string:
+                    # Inside a string value - escape control characters
+                    if char in ['\n', '\r', '\t']:
+                        # Replace literal newline with \n, etc.
+                        if char == '\n':
+                            result.append('\\n')
+                        elif char == '\r':
+                            result.append('\\r')
+                        elif char == '\t':
+                            result.append('\\t')
+                        elif ord(char) < 32 or (126 < ord(char) < 160):
+                            # Other control characters
+                            result.append(f'\\u{ord(char):04x}')
+                        else:
+                            result.append(char)
+                    else:
+                        result.append(char)
+                else:
+                    result.append(char)
+                
+                i += 1
+            
+            return ''.join(result)
+        
         try:
-            # Try to parse as JSON first
+            # First try to parse as-is
             data = await request.json()
             sender = data.get("sender", "unknown")
             message = data.get("message", "")
         except Exception as json_error:
             logger.warning(f"JSON parse failed: {json_error}")
-            # Fallback: try to extract from raw body
-            body_str = body.decode('utf-8', errors='ignore')
             logger.info(f"Raw body string: {body_str}")
             
-            # Simple extraction for malformed JSON
-            sender = "unknown"
-            message = body_str
-            
-            # Try to extract sender and message from malformed JSON
-            if '"sender"' in body_str:
-                try:
-                    # Handle both "sender":"value" and "sender": "value" formats
-                    sender_patterns = [
-                        r'"sender"\s*:\s*"([^"]+)"',
-                        r'"sender"\s*:\s*"([^"]*)"'
-                    ]
-                    for pattern in sender_patterns:
-                        match = re.search(pattern, body_str)
-                        if match:
-                            sender = match.group(1)
-                            break
-                except:
-                    pass
-            
-            if '"message"' in body_str:
-                try:
-                    # Improved message extraction to handle unescaped quotes and multiline content
-                    # First try to find the message field and extract everything until the next field or end
-                    msg_start_pattern = r'"message"\s*:\s*"'
-                    msg_start_match = re.search(msg_start_pattern, body_str)
-                    
-                    if msg_start_match:
-                        start_pos = msg_start_match.end()
-                        # Find the end of the message field by looking for the next field or closing brace
-                        # Handle both cases: message ends with quote followed by comma/brace, or multiline content
-                        
-                        # Try to find the end of the message field
-                        remaining_text = body_str[start_pos:]
-                        
-                        # Look for patterns that indicate end of message field
-                        end_patterns = [
-                            r'",\s*"[^"]*"\s*:',  # message ends with ", followed by another field
-                            r'",\s*}',            # message ends with ", followed by closing brace
-                            r'"\s*}',             # message ends with " followed by closing brace
-                            r'",\s*$',           # message ends with ", at end of string
-                            r'"\s*$'             # message ends with " at end of string
+            try:
+                # Try to fix the JSON by escaping control characters
+                fixed_json = fix_json_strings(body_str)
+                data = json.loads(fixed_json)
+                sender = data.get("sender", "unknown")
+                message = data.get("message", "")
+                logger.info("Successfully parsed JSON after fixing control characters")
+            except Exception as fixed_json_error:
+                logger.warning(f"Fixed JSON parse also failed: {fixed_json_error}")
+                # Fallback: try to extract from raw body using regex
+                sender = "unknown"
+                message = body_str
+                
+                # Try to extract sender and message from malformed JSON
+                if '"sender"' in body_str:
+                    try:
+                        # Handle both "sender":"value" and "sender": "value" formats
+                        sender_patterns = [
+                            r'"sender"\s*:\s*"([^"]+)"',
+                            r'"sender"\s*:\s*"([^"]*)"'
                         ]
-                        
-                        message_end_pos = len(remaining_text)
-                        for pattern in end_patterns:
-                            end_match = re.search(pattern, remaining_text)
-                            if end_match:
-                                message_end_pos = end_match.start()
+                        for pattern in sender_patterns:
+                            match = re.search(pattern, body_str)
+                            if match:
+                                sender = match.group(1)
                                 break
+                    except:
+                        pass
+                
+                if '"message"' in body_str:
+                    try:
+                        # Improved message extraction to handle unescaped quotes and multiline content
+                        # First try to find the message field and extract everything until the next field or end
+                        msg_start_pattern = r'"message"\s*:\s*"'
+                        msg_start_match = re.search(msg_start_pattern, body_str)
                         
-                        # Extract the message content
-                        message_content = remaining_text[:message_end_pos]
-                        
-                        # Clean up escaped characters and control characters
-                        message = message_content.replace('\\n', '\n').replace('\\"', '"').replace('\\t', '\t').replace('\\r', '\r')
-                        
-                        # Remove any remaining control characters that might cause issues
-                        message = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', message)
-                        
-                        logger.info(f"Extracted message from malformed JSON: {message[:100]}...")
-                        
-                except Exception as extract_error:
-                    logger.warning(f"Failed to extract message from malformed JSON: {extract_error}")
-                    # Keep the original body_str as fallback
-                    message = body_str
+                        if msg_start_match:
+                            start_pos = msg_start_match.end()
+                            # Find the end of the message field by looking for the next field or closing brace
+                            # Handle multiline content by looking for closing quote before next field/brace
+                            
+                            remaining_text = body_str[start_pos:]
+                            
+                            # Look for patterns that indicate end of message field
+                            # Use multiline mode to handle newlines in the message
+                            end_patterns = [
+                                r'\n\s*",\s*"[^"]*"\s*:',  # message ends with newline, ", followed by another field
+                                r'\n\s*"\s*}',             # message ends with newline, " followed by closing brace
+                                r'",\s*"[^"]*"\s*:',       # message ends with ", followed by another field (no newline)
+                                r'",\s*}',                 # message ends with ", followed by closing brace
+                                r'"\s*}',                  # message ends with " followed by closing brace
+                                r'",\s*$',                 # message ends with ", at end of string
+                                r'"\s*$'                  # message ends with " at end of string
+                            ]
+                            
+                            message_end_pos = len(remaining_text)
+                            for pattern in end_patterns:
+                                end_match = re.search(pattern, remaining_text, re.MULTILINE)
+                                if end_match:
+                                    message_end_pos = end_match.start()
+                                    break
+                            
+                            # Extract the message content
+                            message_content = remaining_text[:message_end_pos]
+                            
+                            # Clean up escaped characters - convert literal \n to actual newline for display
+                            # But preserve the content as-is (newlines in message are intentional)
+                            message = message_content.replace('\\n', '\n').replace('\\"', '"').replace('\\t', '\t').replace('\\r', '\r')
+                            
+                            # Don't remove control characters that are legitimate parts of the message
+                            # Only remove truly problematic control characters (null bytes, etc.)
+                            message = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', message)  # Keep \n, \r, \t
+                            
+                            logger.info(f"Extracted message from malformed JSON: {message[:100]}...")
+                            
+                    except Exception as extract_error:
+                        logger.warning(f"Failed to extract message from malformed JSON: {extract_error}")
+                        # Keep the original body_str as fallback
+                        message = body_str
         
         logger.info(f"Received SMS from {sender}: {message}")
         
@@ -267,7 +335,7 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
         if price_match:
             parsed["price"] = float(price_match.group(1))
         
-        # Extract timeframe - handle all formats: 5MIN/5M, 15MIN/15M, 30MIN/30M, 1HR/1H/1HOUR, 2HR/2H/2HOUR, 4HR/4H/4HOUR, 1D/1DAY/1 DAY
+        # Extract timeframe - handle all formats: 1MIN/1M, 5MIN/5M, 15MIN/15M, 30MIN/30M, 1HR/1H/1HOUR, 2HR/2H/2HOUR, 4HR/4H/4HOUR, 1D/1DAY/1 DAY
         tf_match = re.search(r'(\d+(?:\s+)?(?:MIN|M|HR|HOUR|H|DAY|D))\s*TF', message, re.IGNORECASE)
         if tf_match:
             timeframe_raw = tf_match.group(1).strip().upper()
