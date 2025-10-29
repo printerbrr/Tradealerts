@@ -76,6 +76,20 @@ try:
     
     # Load confluence rules
     confluence_rules.load_rules()
+    # Ensure MACD next-higher EMA confluence rule is enabled
+    try:
+        updated = False
+        for rule in confluence_rules.rules:
+            name = rule.get('name', '').lower()
+            if 'macd confluence with next higher ema' in name:
+                if not rule.get('enabled', False):
+                    rule['enabled'] = True
+                    updated = True
+        if updated:
+            confluence_rules.save_rules()
+            logger.info("Enabled MACD next-higher EMA confluence rule")
+    except Exception as e:
+        logger.warning(f"Could not enforce MACD confluence rule enablement: {e}")
     logger.info(f"Confluence rules engine initialized")
     
     # Initialize webhook manager (will auto-create config if needed)
@@ -515,14 +529,35 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             
         # Create different message formats based on alert type
         if parsed.get('action') == 'macd_crossover':
-            # MACD Crossover format
-            macd_direction = parsed.get('macd_direction', 'bullish').upper()
+            # MACD: custom compact format using next higher timeframe suffix
+            macd_direction = (parsed.get('macd_direction', 'bullish') or 'bullish').lower()
+            # Map direction to Call/Put
+            direction_label = 'Call' if macd_direction == 'bullish' else 'Put'
+
+            current_tf = (parsed.get('timeframe') or '').upper()
+            next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
+
+            def suffix_from_timeframe(tf: str) -> str:
+                if not tf:
+                    return ''
+                tf = tf.upper()
+                if tf.endswith('MIN'):
+                    # '15MIN' -> '15'
+                    return tf.replace('MIN', '')
+                if tf.endswith('HR'):
+                    # '1HR' -> '1h', '2HR' -> '2h', '4HR' -> '4h'
+                    return tf.replace('HR', 'h').lower()
+                if tf == '1DAY':
+                    return '1d'
+                return tf
+
+            suffix = suffix_from_timeframe(next_tf)
+            title_tf = current_tf or 'N/A'
+
             message = f"""@everyone
-**MACD CROSSOVER - {macd_direction}**
-**TICKER:** {symbol}
-**TIME FRAME:** {parsed.get('timeframe', 'N/A')}
-**MARK:** ${parsed.get('price', 'N/A')}
-**TIME:** {display_time}"""
+{title_tf} MACD Cross - {direction_label}{suffix}
+MARK: ${parsed.get('price', 'N/A')}
+TIME: {display_time}"""
         else:
             # EMA Crossover format (existing)
             ema_pair = "N/A"

@@ -1,0 +1,49 @@
+{
+  "rules": [
+    {
+      "name": "MACD confluence with next higher EMA",
+      "enabled": true,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "macd",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "next_higher",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "ALLOW"
+    },
+    {
+      "name": "EMA confluence with next higher EMA",
+      "enabled": false,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "ema",
+        "direction": "any"
+      },
+      "requirements": [
+        {
+          "timeframe": "next_higher",
+          "check": "ema_status",
+          "must_be": "same_direction"
+        }
+      ],
+      "action": "ALLOW"
+    },
+    {
+      "name": "Block alerts without confluence",
+      "enabled": false,
+      "trigger": {
+        "timeframe": "any",
+        "crossover_type": "any",
+        "direction": "any"
+      },
+      "requirements": [],
+      "action": "BLOCK"
+    }
+  ]
+}
