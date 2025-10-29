@@ -127,19 +127,43 @@ class StateManager:
                         new_macd_price = price
                         old_status = current_macd_status
                     
-                    # Update the record
-                    cursor.execute('''
-                        UPDATE timeframe_states 
-                        SET ema_status = ?, macd_status = ?, 
-                            last_ema_update = ?, last_macd_update = ?,
-                            last_ema_price = ?, last_macd_price = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE symbol = ? AND timeframe = ?
-                    ''', (new_ema_status, new_macd_status,
-                          datetime.now() if crossover_type == 'ema' else None,
-                          datetime.now() if crossover_type == 'macd' else None,
-                          new_ema_price, new_macd_price,
-                          symbol, timeframe))
+                    # Update the record, preserving the non-updated crossover's timestamp
+                    if crossover_type == 'ema':
+                        cursor.execute('''
+                            UPDATE timeframe_states 
+                            SET ema_status = ?,
+                                last_ema_update = ?,
+                                last_ema_price = ?,
+                                macd_status = ?,
+                                last_macd_price = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE symbol = ? AND timeframe = ?
+                        ''', (
+                            new_ema_status,
+                            datetime.now(),
+                            new_ema_price,
+                            new_macd_status,
+                            new_macd_price,
+                            symbol, timeframe
+                        ))
+                    else:
+                        cursor.execute('''
+                            UPDATE timeframe_states 
+                            SET macd_status = ?,
+                                last_macd_update = ?,
+                                last_macd_price = ?,
+                                ema_status = ?,
+                                last_ema_price = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE symbol = ? AND timeframe = ?
+                        ''', (
+                            new_macd_status,
+                            datetime.now(),
+                            new_macd_price,
+                            new_ema_status,
+                            new_ema_price,
+                            symbol, timeframe
+                        ))
                     
                 else:
                     # Create new record
@@ -327,6 +351,95 @@ class StateManager:
                 summary['macd_bearish_count'] += 1
         
         return summary
+
+    def bootstrap_from_history(self):
+        """Rebuild timeframe_states from the latest entries in state_history.
+        Uses only locally recorded crossover history. No external API calls.
+        """
+        try:
+            with sqlite3.connect(self.database_path) as conn:
+                cursor = conn.cursor()
+
+                # Identify all symbol/timeframe pairs present in history
+                cursor.execute('''
+                    SELECT DISTINCT symbol, timeframe
+                    FROM state_history
+                ''')
+                pairs = cursor.fetchall()
+
+                touched = 0
+                for symbol, timeframe in pairs:
+                    # Latest EMA crossover for this pair
+                    cursor.execute('''
+                        SELECT new_status, price, timestamp
+                        FROM state_history
+                        WHERE symbol = ? AND timeframe = ? AND crossover_type = 'ema'
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ''', (symbol, timeframe))
+                    ema_row = cursor.fetchone()
+
+                    # Latest MACD crossover for this pair
+                    cursor.execute('''
+                        SELECT new_status, price, timestamp
+                        FROM state_history
+                        WHERE symbol = ? AND timeframe = ? AND crossover_type = 'macd'
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    ''', (symbol, timeframe))
+                    macd_row = cursor.fetchone()
+
+                    ema_status = (ema_row[0] if ema_row else 'UNKNOWN')
+                    ema_price = (ema_row[1] if ema_row else None)
+                    ema_ts = (ema_row[2] if ema_row else None)
+
+                    macd_status = (macd_row[0] if macd_row else 'UNKNOWN')
+                    macd_price = (macd_row[1] if macd_row else None)
+                    macd_ts = (macd_row[2] if macd_row else None)
+
+                    # Check if a state record exists
+                    cursor.execute('''
+                        SELECT 1 FROM timeframe_states WHERE symbol = ? AND timeframe = ?
+                    ''', (symbol.upper(), timeframe.upper()))
+                    exists = cursor.fetchone() is not None
+
+                    if exists:
+                        # Update only fields we have values for
+                        sets = []
+                        params = []
+                        if ema_row:
+                            sets += ['ema_status = ?', 'last_ema_update = ?', 'last_ema_price = ?']
+                            params += [ema_status, ema_ts, ema_price]
+                        if macd_row:
+                            sets += ['macd_status = ?', 'last_macd_update = ?', 'last_macd_price = ?']
+                            params += [macd_status, macd_ts, macd_price]
+                        if sets:
+                            sets.append('updated_at = CURRENT_TIMESTAMP')
+                            sql = f"UPDATE timeframe_states SET {', '.join(sets)} WHERE symbol = ? AND timeframe = ?"
+                            params += [symbol.upper(), timeframe.upper()]
+                            cursor.execute(sql, params)
+                            touched += 1
+                    else:
+                        # Insert new record based on history
+                        cursor.execute('''
+                            INSERT INTO timeframe_states (
+                                symbol, timeframe,
+                                ema_status, macd_status,
+                                last_ema_update, last_macd_update,
+                                last_ema_price, last_macd_price
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            symbol.upper(), timeframe.upper(),
+                            ema_status, macd_status,
+                            ema_ts, macd_ts,
+                            ema_price, macd_price
+                        ))
+                        touched += 1
+
+                conn.commit()
+                logger.info(f"[DEV] Bootstrap complete: timeframe_states updated/inserted for {touched} items from history")
+        except Exception as e:
+            logger.error(f"[DEV] Bootstrap from history failed: {e}")
 
 # Global state manager instance
 state_manager = StateManager()

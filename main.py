@@ -73,6 +73,12 @@ try:
     state_manager.database_path = PRODUCTION_DATABASE
     state_manager.init_database()
     logger.info(f"State manager initialized with database: {PRODUCTION_DATABASE}")
+    # Rebuild current timeframe states from recorded crossover history
+    try:
+        state_manager.bootstrap_from_history()
+        logger.info("State bootstrap from history completed")
+    except Exception as e:
+        logger.warning(f"State bootstrap from history failed: {e}")
     
     # Load confluence rules
     confluence_rules.load_rules()
