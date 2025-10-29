@@ -151,6 +151,7 @@ async def receive_sms(request: Request):
                     i += 1
                     continue
                 
+                # Check for unescaped quote (toggle string state)
                 if char == '"' and (i == 0 or json_str[i-1] != '\\'):
                     in_string = not in_string
                     result.append(char)
@@ -158,37 +159,48 @@ async def receive_sms(request: Request):
                     continue
                 
                 if in_string:
-                    # Inside a string value - escape control characters
-                    if char in ['\n', '\r', '\t']:
-                        # Replace literal newline with \n, etc.
-                        if char == '\n':
-                            result.append('\\n')
-                        elif char == '\r':
-                            result.append('\\r')
-                        elif char == '\t':
-                            result.append('\\t')
-                        elif ord(char) < 32 or (126 < ord(char) < 160):
-                            # Other control characters
-                            result.append(f'\\u{ord(char):04x}')
-                        else:
-                            result.append(char)
+                    # Inside a string value - escape ALL control characters
+                    char_ord = ord(char)
+                    # Check if it's a control character (0x00-0x1F) or other problematic chars
+                    if char == '\n':
+                        result.append('\\n')
+                    elif char == '\r':
+                        result.append('\\r')
+                    elif char == '\t':
+                        result.append('\\t')
+                    elif char == '\b':
+                        result.append('\\b')
+                    elif char == '\f':
+                        result.append('\\f')
+                    elif char == '"':
+                        # Shouldn't happen if we're tracking quotes correctly, but escape it
+                        result.append('\\"')
+                    elif 0 <= char_ord < 32:
+                        # Other control characters - escape as Unicode
+                        result.append(f'\\u{char_ord:04x}')
                     else:
                         result.append(char)
                 else:
+                    # Outside string - keep as-is
                     result.append(char)
                 
                 i += 1
             
             return ''.join(result)
         
+        # Try to parse JSON directly from raw body (don't use request.json() as it fails on control chars)
+        sender = "unknown"
+        message = ""
+        
         try:
-            # First try to parse as-is
-            data = await request.json()
+            # First try to parse the raw body as-is
+            data = json.loads(body_str)
             sender = data.get("sender", "unknown")
             message = data.get("message", "")
-        except Exception as json_error:
-            logger.warning(f"JSON parse failed: {json_error}")
-            logger.info(f"Raw body string: {body_str}")
+            logger.debug("Successfully parsed JSON without fixing")
+        except json.JSONDecodeError as json_error:
+            # Initial parse failed - this is expected for malformed JSON, try to fix it
+            logger.debug(f"Initial JSON parse failed (will attempt fix): {json_error}")
             
             try:
                 # Try to fix the JSON by escaping control characters
@@ -198,7 +210,9 @@ async def receive_sms(request: Request):
                 message = data.get("message", "")
                 logger.info("Successfully parsed JSON after fixing control characters")
             except Exception as fixed_json_error:
-                logger.warning(f"Fixed JSON parse also failed: {fixed_json_error}")
+                # Both attempts failed - this is a real problem
+                logger.warning(f"JSON parse failed: Initial error - {json_error}, Fixed JSON also failed - {fixed_json_error}")
+                logger.debug(f"Raw body string: {body_str[:500]}...")
                 # Fallback: try to extract from raw body using regex
                 sender = "unknown"
                 message = body_str
