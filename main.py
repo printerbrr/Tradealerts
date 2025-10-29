@@ -563,20 +563,45 @@ async def send_discord_alert(log_data: Dict[str, Any]):
 MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}"""
         else:
-            # EMA Crossover format (existing)
-            ema_pair = "N/A"
-            if parsed.get('ema_short') and parsed.get('ema_long'):
-                ema_pair = f"{parsed.get('ema_short')}/{parsed.get('ema_long')}"
-            
-            # Add direction to EMA crossover message
-            ema_direction = parsed.get('ema_direction', 'bullish').upper()
+            # EMA Crossover format using confluence with next higher timeframe
+            current_tf = (parsed.get('timeframe') or '').upper()
+            next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
+            ema_direction = (parsed.get('ema_direction', 'bullish') or 'bullish').lower()
 
+            # Determine suffix token for the current timeframe (e.g., 30, 1H, 1D)
+            def suffix_from_timeframe_for_tag(tf: str) -> str:
+                if not tf:
+                    return ''
+                tf = tf.upper()
+                if tf.endswith('MIN'):
+                    # '15MIN' -> '15'
+                    return tf.replace('MIN', '')
+                if tf.endswith('HR'):
+                    # '1HR' -> '1H'
+                    return tf.replace('HR', 'H')
+                if tf == '1DAY':
+                    return '1D'
+                return tf
+
+            tag_suffix = suffix_from_timeframe_for_tag(current_tf)
+
+            # Check next higher timeframe EMA alignment with current crossover direction
+            states = state_manager.get_all_states(symbol)
+            higher_ema_status = None
+            if next_tf and next_tf in states:
+                higher_ema_status = (states[next_tf].get('ema_status') or 'UNKNOWN').upper()
+
+            # Determine alert tag per spec
+            if ema_direction == 'bullish':
+                tag = f"CALL{tag_suffix}" if higher_ema_status == 'BULLISH' else f"C{tag_suffix}"
+            else:
+                tag = f"PUT{tag_suffix}" if higher_ema_status == 'BEARISH' else f"P{tag_suffix}"
+
+            title_tf = current_tf or 'N/A'
             message = f"""@everyone
-**EMA CROSSOVER - {ema_pair} - {ema_direction}**
-**TICKER:** {symbol}
-**TIME FRAME:** {parsed.get('timeframe', 'N/A')}
-**MARK:** ${parsed.get('price', 'N/A')}
-**TIME:** {display_time}"""
+{title_tf} EMA Cross - {tag}
+MARK: ${parsed.get('price', 'N/A')}
+TIME: {display_time}"""
         
         payload = {
             "content": message
