@@ -25,8 +25,15 @@ class StateManager:
     def init_database(self):
         """Initialize the SQLite database with required tables"""
         try:
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
+                # Set pragmatic defaults for better concurrency
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                    cursor.execute("PRAGMA busy_timeout=5000;")
+                    cursor.execute("PRAGMA synchronous=NORMAL;")
+                except Exception:
+                    pass
                 
                 # Create timeframe_states table
                 cursor.execute('''
@@ -97,7 +104,7 @@ class StateManager:
             if timeframe not in TIMEFRAME_HIERARCHY:
                 logger.warning(f"[DEV] Unknown timeframe: {timeframe}")
             
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 
                 # Get current state
@@ -186,10 +193,11 @@ class StateManager:
                           datetime.now() if crossover_type == 'macd' else None,
                           ema_price, macd_price))
                 
-                # Log the state change
-                self.log_state_change(symbol, timeframe, crossover_type, old_status, direction, price)
-                
+                # Commit the main state update before writing to history to avoid overlapping write locks
                 conn.commit()
+
+                # Log the state change in a separate step after commit
+                self.log_state_change(symbol, timeframe, crossover_type, old_status, direction, price)
                 
                 logger.info(f"[DEV] STATE UPDATE: {symbol} {timeframe} {crossover_type.upper()}: {old_status} -> {direction} (price: ${price})")
                 return True
@@ -204,7 +212,7 @@ class StateManager:
             symbol = symbol.upper()
             timeframe = timeframe.upper()
             
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT ema_status, macd_status, last_ema_update, last_macd_update,
@@ -240,7 +248,7 @@ class StateManager:
         try:
             symbol = symbol.upper()
             
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT timeframe, ema_status, macd_status, last_ema_update, last_macd_update,
@@ -288,7 +296,7 @@ class StateManager:
                         old_status: str, new_status: str, price: Optional[float] = None):
         """Log state changes to history table"""
         try:
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO state_history 
@@ -357,7 +365,7 @@ class StateManager:
         Uses only locally recorded crossover history. No external API calls.
         """
         try:
-            with sqlite3.connect(self.database_path) as conn:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
 
                 # Identify all symbol/timeframe pairs present in history
