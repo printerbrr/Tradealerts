@@ -625,6 +625,7 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             macd_direction = (parsed.get('macd_direction', 'bullish') or 'bullish').lower()
             # Map direction to Call/Put
             direction_label = 'Call' if macd_direction == 'bullish' else 'Put'
+            emoji = '🟢' if macd_direction == 'bullish' else '🔴'
 
             current_tf = (parsed.get('timeframe') or '').upper()
             next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
@@ -647,7 +648,7 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             title_tf = current_tf or 'N/A'
 
             message = f"""@everyone
-{title_tf} MACD Cross - {direction_label}{suffix}
+{emoji} {title_tf} MACD Cross - {direction_label}{suffix}
 MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}"""
         else:
@@ -655,6 +656,7 @@ TIME: {display_time}"""
             current_tf = (parsed.get('timeframe') or '').upper()
             next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
             ema_direction = (parsed.get('ema_direction', 'bullish') or 'bullish').lower()
+            emoji = '🟢' if ema_direction == 'bullish' else '🔴'
 
             # Determine suffix token for the current timeframe (e.g., 30, 1H, 1D)
             def suffix_from_timeframe_for_tag(tf: str) -> str:
@@ -687,7 +689,7 @@ TIME: {display_time}"""
 
             title_tf = current_tf or 'N/A'
             message = f"""@everyone
-{title_tf} EMA Cross - {tag}
+{emoji} {title_tf} EMA Cross - {tag}
 MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}"""
         
