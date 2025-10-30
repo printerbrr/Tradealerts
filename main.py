@@ -876,22 +876,79 @@ async def add_ticker(req: AddTickerRequest):
 async def refresh_ema_states(req: RefreshStatesRequest):
     """Pull candles via yfinance and update EMA direction per symbol/timeframe."""
     try:
+        import time
         import yfinance as yf
-        from pandas import DataFrame
+        import pandas as pd
+        import requests as rq
 
-        def yf_interval(tf: str) -> str:
+        # Map app TF to Yahoo base interval; resample where needed (e.g., 4HR)
+        BASE_INTERVAL = {"5MIN":"5m","15MIN":"15m","30MIN":"30m","1HR":"60m","4HR":"60m","1DAY":"1d"}
+
+        def effective_period_days(tf: str, requested_days: int) -> int:
+            # Yahoo intraday limits: up to 60d for <=60m intervals
+            return min(requested_days, 60) if tf in ("5MIN","15MIN","30MIN","1HR","4HR") else requested_days
+
+        # Shared session with headers reduces JSONDecode issues/rate-limits
+        session = rq.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradeAlerts/2.0",
+            "Accept": "application/json, text/javascript, */*; q=0.01"
+        })
+
+        def fetch_history(sym: str, tf: str, days: int, retries: int = 2) -> pd.DataFrame:
+            interval = BASE_INTERVAL.get(tf.upper(), "60m")
+            period_days = effective_period_days(tf.upper(), days)
+            for attempt in range(retries + 1):
+                try:
+                    df = yf.download(
+                        sym,
+                        period=f"{period_days}d",
+                        interval=interval,
+                        progress=False,
+                        auto_adjust=False,
+                        threads=False,
+                        session=session
+                    )
+                    if df is not None and not df.empty:
+                        return df
+                except Exception as e:
+                    if attempt == retries:
+                        raise e
+                    time.sleep(0.8 * (attempt + 1))
+            return pd.DataFrame()
+
+        def to_timeframe(df: pd.DataFrame, tf: str) -> pd.DataFrame:
             tfu = tf.upper()
-            return {"5MIN":"5m","15MIN":"15m","30MIN":"30m","1HR":"60m","4HR":"240m","1DAY":"1d"}.get(tfu, "60m")
+            if tfu == "4HR":
+                # Resample 60m to 4H
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    df.index = pd.to_datetime(df.index)
+                ohlc_dict = {col: "last" for col in df.columns}
+                # Use OHLC where available
+                for col in ("Open","High","Low","Close"):
+                    if col in df.columns:
+                        ohlc_dict[col] = {"Open":"first","High":"max","Low":"min","Close":"last"}[col]
+                res = df.resample("4H").agg(ohlc_dict).dropna(how="all")
+                return res
+            return df
 
         symbols = [s.upper() for s in (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])]
         updated: List[Dict[str, Any]] = []
         for sym in symbols:
             for tf in req.timeframes:
-                data = yf.download(sym, period=f"{req.lookback_days}d", interval=yf_interval(tf), progress=False, auto_adjust=False)
+                try:
+                    raw = fetch_history(sym, tf, req.lookback_days)
+                except Exception as e:
+                    logger.warning(f"Download failed for {sym} {tf}: {e}")
+                    continue
+                data = to_timeframe(raw, tf)
                 if data is None or getattr(data, 'empty', True) or 'Close' not in data:
                     logger.warning(f"No data for {sym} {tf}")
                     continue
-                close = data['Close']
+                close = data['Close'].dropna()
+                if close.empty:
+                    logger.warning(f"No close data for {sym} {tf}")
+                    continue
                 price = float(close.iloc[-1])
                 for pair in req.ema_pairs:
                     if not isinstance(pair, (list, tuple)) or len(pair) != 2:
