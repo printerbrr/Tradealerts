@@ -41,6 +41,23 @@ class AlertConfig(BaseModel):
     parameters: Dict[str, Any] = {}
     discord_webhook_url: Optional[str] = None
 
+class TimeFilterToggle(BaseModel):
+    enabled: bool  # True = enforce time window; False = ignore_time_filter
+
+class WebhookMapping(BaseModel):
+    symbol: str
+    url: str
+
+class AddTickerRequest(BaseModel):
+    symbol: str
+    webhook_url: str
+
+class RefreshStatesRequest(BaseModel):
+    symbols: List[str] = []
+    timeframes: List[str] = ["5MIN","15MIN","30MIN","1HR","4HR","1DAY"]
+    ema_pairs: List[List[int]] = [[9,21]]
+    lookback_days: int = 30
+
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
 
@@ -105,7 +122,7 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize state tracking system: {e}")
 
-@app.get("/")
+@app.get("/", tags=["Root"])
 async def root():
     return {
         "message": "Trade Alerts SMS Parser", 
@@ -114,7 +131,7 @@ async def root():
         "mode": "production"
     }
 
-@app.post("/webhook/sms")
+@app.post("/webhook/sms", tags=["Ingest"]) 
 async def receive_sms(request: Request):
     """
     Webhook endpoint to receive SMS messages forwarded from Tasker
@@ -711,12 +728,12 @@ TIME: {display_time}"""
     except Exception as e:
         logger.error(f"Error sending Discord alert: {str(e)}")
 
-@app.get("/config")
+@app.get("/config", tags=["Config"]) 
 async def get_config():
     """Get current configuration"""
     return alert_config
 
-@app.post("/config")
+@app.post("/config", tags=["Config"]) 
 async def update_config(config: AlertConfig):
     """Update configuration"""
     global alert_config
@@ -724,21 +741,29 @@ async def update_config(config: AlertConfig):
     logger.info(f"Configuration updated: {config}")
     return {"status": "success", "message": "Configuration updated"}
 
+@app.post("/config/time_filter", tags=["Config"]) 
+async def set_time_filter(toggle: TimeFilterToggle):
+    """Enable/disable business-hours alert window (5 AM - 1 PM PT)."""
+    # when enabled=True we enforce window → ignore_time_filter=False
+    alert_config.parameters["ignore_time_filter"] = (not toggle.enabled)
+    logger.info(f"Time filter enabled={toggle.enabled}")
+    return {"status": "success", "enabled": toggle.enabled}
+
 # Confluence Rules Management Endpoints
-@app.get("/confluence/rules")
+@app.get("/confluence/rules", include_in_schema=False)
 async def get_confluence_rules():
     """Get current confluence rules configuration"""
     summary = confluence_rules.get_rule_summary()
     return summary
 
-@app.get("/confluence/rules/{rule_index}")
+@app.get("/confluence/rules/{rule_index}", include_in_schema=False)
 async def get_rule_details(rule_index: int):
     """Get details about a specific rule by index"""
     if 0 <= rule_index < len(confluence_rules.rules):
         return confluence_rules.rules[rule_index]
     raise HTTPException(status_code=404, detail="Rule not found")
 
-@app.post("/confluence/rules/{rule_index}/enable")
+@app.post("/confluence/rules/{rule_index}/enable", include_in_schema=False)
 async def enable_rule(rule_index: int):
     """Enable a confluence rule"""
     if 0 <= rule_index < len(confluence_rules.rules):
@@ -749,7 +774,7 @@ async def enable_rule(rule_index: int):
         return {"status": "success", "message": f"Rule '{rule_name}' enabled"}
     raise HTTPException(status_code=404, detail="Rule not found")
 
-@app.post("/confluence/rules/{rule_index}/disable")
+@app.post("/confluence/rules/{rule_index}/disable", include_in_schema=False)
 async def disable_rule(rule_index: int):
     """Disable a confluence rule"""
     if 0 <= rule_index < len(confluence_rules.rules):
@@ -760,7 +785,7 @@ async def disable_rule(rule_index: int):
         return {"status": "success", "message": f"Rule '{rule_name}' disabled"}
     raise HTTPException(status_code=404, detail="Rule not found")
 
-@app.post("/confluence/rules/reload")
+@app.post("/confluence/rules/reload", include_in_schema=False)
 async def reload_rules():
     """Reload confluence rules from file"""
     confluence_rules.reload_rules()
@@ -768,13 +793,13 @@ async def reload_rules():
     return {"status": "success", "message": "Rules reloaded successfully"}
 
 # Webhook Management Endpoints
-@app.get("/webhooks")
+@app.get("/webhooks", tags=["Webhooks"]) 
 async def get_webhooks():
     """Get all configured webhooks"""
     config = webhook_manager.get_config()
     return config
 
-@app.get("/webhooks/{symbol}")
+@app.get("/webhooks/{symbol}", tags=["Webhooks"]) 
 async def get_symbol_webhook(symbol: str):
     """Get webhook URL for a specific symbol"""
     webhook_url = webhook_manager.get_webhook(symbol)
@@ -788,7 +813,7 @@ async def get_symbol_webhook(symbol: str):
         }
     return {"symbol": symbol.upper(), "webhook_configured": False}
 
-@app.post("/webhooks/{symbol}")
+@app.post("/webhooks/{symbol}", tags=["Webhooks"]) 
 async def set_symbol_webhook(symbol: str, request: Request):
     """Set or update webhook URL for a symbol"""
     symbol_upper = symbol.upper()
@@ -811,7 +836,7 @@ async def set_symbol_webhook(symbol: str, request: Request):
         logger.info(f"Added new webhook for {symbol_upper}")
         return {"status": "success", "message": f"Webhook added for {symbol_upper}"}
 
-@app.delete("/webhooks/{symbol}")
+@app.delete("/webhooks/{symbol}", tags=["Webhooks"]) 
 async def delete_symbol_webhook(symbol: str):
     """Remove webhook for a symbol"""
     symbol_upper = symbol.upper()
@@ -825,7 +850,7 @@ async def delete_symbol_webhook(symbol: str):
     else:
         raise HTTPException(status_code=404, detail=f"No webhook configured for {symbol_upper}")
 
-@app.get("/symbols")
+@app.get("/symbols", tags=["Symbols"]) 
 async def get_tracked_symbols():
     """Get list of all tracked symbols"""
     symbols = webhook_manager.get_all_symbols()
@@ -835,7 +860,54 @@ async def get_tracked_symbols():
         "has_default": "default" in webhook_manager.webhooks
     }
 
-@app.get("/debug/states", tags=["Debug"])
+@app.post("/symbols", tags=["Symbols"]) 
+async def add_ticker(req: AddTickerRequest):
+    """Add a ticker and set its webhook URL."""
+    sym = req.symbol.upper()
+    webhook_manager.set_webhook(sym, req.webhook_url)
+    try:
+        # Optionally prime symbol in state DB (best-effort)
+        state_manager.ensure_symbol_exists(sym)
+    except Exception as e:
+        logger.debug(f"ensure_symbol_exists skipped: {e}")
+    return {"status": "success", "symbol": sym}
+
+@app.post("/admin/refresh-ema-states", tags=["Admin"]) 
+async def refresh_ema_states(req: RefreshStatesRequest):
+    """Pull candles via yfinance and update EMA direction per symbol/timeframe."""
+    try:
+        import yfinance as yf
+        from pandas import DataFrame
+
+        def yf_interval(tf: str) -> str:
+            tfu = tf.upper()
+            return {"5MIN":"5m","15MIN":"15m","30MIN":"30m","1HR":"60m","4HR":"240m","1DAY":"1d"}.get(tfu, "60m")
+
+        symbols = [s.upper() for s in (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])]
+        updated: List[Dict[str, Any]] = []
+        for sym in symbols:
+            for tf in req.timeframes:
+                data = yf.download(sym, period=f"{req.lookback_days}d", interval=yf_interval(tf), progress=False, auto_adjust=False)
+                if data is None or getattr(data, 'empty', True) or 'Close' not in data:
+                    logger.warning(f"No data for {sym} {tf}")
+                    continue
+                close = data['Close']
+                price = float(close.iloc[-1])
+                for pair in req.ema_pairs:
+                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                        continue
+                    short, long = int(pair[0]), int(pair[1])
+                    ema_s = close.ewm(span=short, adjust=False).mean()
+                    ema_l = close.ewm(span=long, adjust=False).mean()
+                    direction = "bullish" if float(ema_s.iloc[-1]) > float(ema_l.iloc[-1]) else "bearish"
+                    state_manager.update_timeframe_state(sym, tf, "ema", direction, price)
+                    updated.append({"symbol": sym, "timeframe": tf, "ema_pair": f"{short}/{long}", "direction": direction.upper(), "price": price})
+        return {"status": "success", "updated": updated}
+    except Exception as e:
+        logger.error(f"refresh_ema_states failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to refresh EMA states")
+
+@app.get("/debug/states", tags=["Debug"]) 
 async def debug_states(symbol: str = "SPY", all_symbols: bool = False) -> Dict[str, Any]:
     """
     Inspect current timeframe states from the database.

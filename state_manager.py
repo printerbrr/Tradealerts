@@ -361,6 +361,25 @@ class StateManager:
         
         return summary
 
+    def ensure_symbol_exists(self, symbol: str):
+        """Ensure there is at least one row for a symbol to make it visible in queries."""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM timeframe_states WHERE symbol = ? LIMIT 1", (symbol.upper(),))
+                exists = cursor.fetchone() is not None
+                if not exists:
+                    cursor.execute(
+                        """
+                        INSERT INTO timeframe_states (symbol, timeframe, ema_status, macd_status)
+                        VALUES (?, '5MIN', 'UNKNOWN', 'UNKNOWN')
+                        """,
+                        (symbol.upper(),)
+                    )
+                    conn.commit()
+        except Exception as e:
+            logger.warning(f"[DEV] ensure_symbol_exists skipped for {symbol}: {e}")
+
     def bootstrap_from_history(self):
         """Rebuild timeframe_states from the latest entries in state_history.
         Uses only locally recorded crossover history. No external API calls.
