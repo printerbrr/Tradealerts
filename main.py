@@ -12,6 +12,10 @@ from state_manager import state_manager
 from confluence_rules import confluence_rules
 from webhook_manager import webhook_manager
 
+# NEW: imports for scheduler/timezone
+import asyncio
+import pytz
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,  # Production logging level
@@ -727,6 +731,104 @@ TIME: {display_time}"""
             
     except Exception as e:
         logger.error(f"Error sending Discord alert: {str(e)}")
+
+# NEW: helper to post simple messages to a webhook
+def _post_discord_message(webhook_url: str, content: str) -> bool:
+    try:
+        import requests
+        resp = requests.post(webhook_url, json={"content": content}, headers={"Content-Type": "application/json"})
+        if resp.status_code == 204:
+            return True
+        logger.warning(f"Discord post non-204: {resp.status_code}")
+        return False
+    except Exception as e:
+        logger.error(f"Discord post failed: {e}")
+        return False
+
+# NEW: build EMA summary text for a symbol
+def _build_ema_summary(symbol: str) -> str:
+    states = state_manager.get_all_states(symbol)
+    # Maintain display order
+    order = ["1MIN","5MIN","15MIN","30MIN","1HR","2HR","4HR","1DAY"]
+    def pretty_tf(tf: str) -> str:
+        tfu = tf.upper()
+        if tfu.endswith("MIN"):
+            return tfu.replace("MIN", "Min")
+        if tfu.endswith("HR"):
+            return tfu.replace("HR", "Hr")
+        if tfu == "1DAY":
+            return "1Day"
+        return tf
+    lines: List[str] = []
+    # Timestamp header in Pacific time
+    pacific = pytz.timezone('America/Los_Angeles')
+    now_pt = datetime.now(pacific)
+    header = now_pt.strftime("%m/%d/%Y %I:%M %p")
+    lines.append(f"{header}")
+    for tf in order:
+        if tf in states:
+            status = (states[tf].get('ema_status') or 'UNKNOWN').capitalize()
+            lines.append(f"{pretty_tf(tf)} - {status}")
+    return "\n".join(lines)
+
+# NEW: job to send summary to each configured symbol's webhook
+async def send_daily_ema_summaries():
+    symbols = webhook_manager.get_all_symbols()
+    if not symbols:
+        symbols = ["SPY"]
+    for sym in symbols:
+        url = webhook_manager.get_webhook(sym)
+        if not url:
+            continue
+        content = f"{sym} EMA States\n\n" + _build_ema_summary(sym)
+        ok = _post_discord_message(url, content)
+        if ok:
+            logger.info(f"Daily EMA summary sent for {sym}")
+        else:
+            logger.warning(f"Failed to send daily EMA summary for {sym}")
+
+# NEW: background scheduler that runs the job daily at 06:30 PT
+async def _daily_scheduler_task():
+    pacific = pytz.timezone('America/Los_Angeles')
+    while True:
+        now = datetime.now(pacific)
+        target = now.replace(hour=6, minute=30, second=0, microsecond=0)
+        if now >= target:
+            # schedule next day
+            from datetime import timedelta
+            target = target + timedelta(days=1)
+        # sleep until target
+        seconds = (target - now).total_seconds()
+        try:
+            await asyncio.sleep(seconds)
+        except Exception:
+            # in case of sleep interruption, retry quickly
+            await asyncio.sleep(5)
+            continue
+        try:
+            await send_daily_ema_summaries()
+        except Exception as e:
+            logger.error(f"Daily EMA summary job failed: {e}")
+            # continue loop for next day
+
+# NEW: startup hook to launch scheduler
+@app.on_event("startup")
+async def _start_scheduler():
+    try:
+        asyncio.create_task(_daily_scheduler_task())
+        logger.info("Daily EMA summary scheduler started (06:30 PT)")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
+# NEW: optional admin endpoint to trigger summary immediately
+@app.post("/admin/send-daily-ema-summaries", tags=["Admin"]) 
+async def admin_send_daily_ema_summaries():
+    try:
+        await send_daily_ema_summaries()
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"admin send daily summaries failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/config", tags=["Config"]) 
 async def get_config():
