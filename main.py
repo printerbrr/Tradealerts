@@ -912,9 +912,14 @@ async def refresh_ema_states(req: RefreshStatesRequest):
                     if df is not None and not df.empty:
                         return df
                 except Exception as e:
-                    if attempt == retries:
-                        raise e
+                    # fallback: try Ticker().history on next loop
                     time.sleep(0.8 * (attempt + 1))
+                try:
+                    hist = yf.Ticker(sym, session=session).history(period=f"{period_days}d", interval=interval, actions=False, auto_adjust=False, prepost=False)
+                    if hist is not None and not hist.empty:
+                        return hist
+                except Exception:
+                    pass
             return pd.DataFrame()
 
         def to_timeframe(df: pd.DataFrame, tf: str) -> pd.DataFrame:
@@ -923,31 +928,49 @@ async def refresh_ema_states(req: RefreshStatesRequest):
                 # Resample 60m to 4H
                 if not isinstance(df.index, pd.DatetimeIndex):
                     df.index = pd.to_datetime(df.index)
-                ohlc_dict = {col: "last" for col in df.columns}
-                # Use OHLC where available
-                for col in ("Open","High","Low","Close"):
-                    if col in df.columns:
-                        ohlc_dict[col] = {"Open":"first","High":"max","Low":"min","Close":"last"}[col]
-                res = df.resample("4H").agg(ohlc_dict).dropna(how="all")
+                # Build robust agg dict for common Yahoo columns
+                agg = {}
+                if "Open" in df.columns:
+                    agg["Open"] = "first"
+                if "High" in df.columns:
+                    agg["High"] = "max"
+                if "Low" in df.columns:
+                    agg["Low"] = "min"
+                if "Close" in df.columns:
+                    agg["Close"] = "last"
+                if "Adj Close" in df.columns:
+                    agg["Adj Close"] = "last"
+                if "Volume" in df.columns:
+                    agg["Volume"] = "sum"
+                # Default any other columns to last
+                for col in df.columns:
+                    if col not in agg:
+                        agg[col] = "last"
+                res = df.resample("4h").agg(agg).dropna(how="all")
                 return res
             return df
 
         symbols = [s.upper() for s in (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])]
         updated: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
         for sym in symbols:
             for tf in req.timeframes:
                 try:
                     raw = fetch_history(sym, tf, req.lookback_days)
                 except Exception as e:
-                    logger.warning(f"Download failed for {sym} {tf}: {e}")
+                    msg = f"Download failed for {sym} {tf}: {e}"
+                    logger.warning(msg)
+                    errors.append({"symbol": sym, "timeframe": tf, "error": str(e)})
                     continue
                 data = to_timeframe(raw, tf)
                 if data is None or getattr(data, 'empty', True) or 'Close' not in data:
                     logger.warning(f"No data for {sym} {tf}")
+                    errors.append({"symbol": sym, "timeframe": tf, "error": "no_data"})
                     continue
                 close = data['Close'].dropna()
                 if close.empty:
                     logger.warning(f"No close data for {sym} {tf}")
+                    errors.append({"symbol": sym, "timeframe": tf, "error": "no_close"})
                     continue
                 price = float(close.iloc[-1])
                 for pair in req.ema_pairs:
@@ -959,10 +982,11 @@ async def refresh_ema_states(req: RefreshStatesRequest):
                     direction = "bullish" if float(ema_s.iloc[-1]) > float(ema_l.iloc[-1]) else "bearish"
                     state_manager.update_timeframe_state(sym, tf, "ema", direction, price)
                     updated.append({"symbol": sym, "timeframe": tf, "ema_pair": f"{short}/{long}", "direction": direction.upper(), "price": price})
-        return {"status": "success", "updated": updated}
+        status = "success" if updated and not errors else ("partial" if updated else "error")
+        return {"status": status, "updated": updated, "errors": errors}
     except Exception as e:
         logger.error(f"refresh_ema_states failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to refresh EMA states")
+        return {"status": "error", "updated": [], "errors": [{"error": str(e)}]}
 
 @app.get("/debug/states", tags=["Debug"]) 
 async def debug_states(symbol: str = "SPY", all_symbols: bool = False) -> Dict[str, Any]:
