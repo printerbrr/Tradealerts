@@ -63,6 +63,7 @@ A lean SMS-based trade alerting system that receives SMS messages forwarded from
 - `POST /webhook/sms` - Receive SMS messages
 - `GET /config` - Get current configuration
 - `POST /config` - Update configuration
+ - `POST /admin/send-daily-ema-summaries` - Manually trigger daily EMA summaries
 
 ## Configuration
 
@@ -87,6 +88,28 @@ The system uses a flexible configuration system. You can update parsing rules an
 2. **Set Alert Parameters**: Configure the `analyze_data()` function with your specific criteria
 3. **Test the System**: Send test SMS messages to verify the flow
 4. **Deploy**: Consider deploying to a cloud service for 24/7 operation
+
+## Daily EMA Summary (06:30 PT)
+
+The system posts a single message each morning at 06:30 AM Pacific Time to every configured ticker channel. The message lists the current EMA state for each timeframe that has data for that ticker.
+
+Example format:
+
+```
+10/30/2025 06:30 AM
+1Min - Bullish
+5Min - Bearish
+15Min - Bullish
+...
+```
+
+Notes:
+- One message per ticker channel (based on per-symbol webhooks).
+- Timezone is `America/Los_Angeles` (PST/PDT handled automatically).
+- Uses existing states stored in `market_states.db`.
+
+Manual trigger (useful for testing or on-demand):
+- `POST /admin/send-daily-ema-summaries`
 
 ## Logging
 

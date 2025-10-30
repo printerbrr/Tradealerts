@@ -50,6 +50,15 @@ The system now supports **multi-ticker webhook routing** - each ticker can have 
 - **GET** `/symbols`
 - Returns list of all configured symbols
 
+#### Daily EMA Summary
+- Automatically posts once per day at 06:30 AM Pacific Time to each ticker channel (per-symbol webhook)
+- Content includes the EMA state for each timeframe currently tracked for that symbol
+- Timezone: `America/Los_Angeles` (handles DST)
+
+Manual trigger for testing:
+- **POST** `/admin/send-daily-ema-summaries`
+- Sends the summary immediately for all configured symbols
+
 ## Example Workflow
 
 ### Adding QQQ as a New Ticker:
@@ -112,7 +121,7 @@ TradeAlerts/
 ├── discord_webhooks.json    # Webhook configuration (auto-created)
 ├── discord_config.txt       # Legacy config (still works)
 ├── webhook_manager.py       # Webhook routing logic
-├── main.py                  # Updated with webhook routing
+├── main.py                  # Updated with webhook routing + daily EMA summary scheduler
 └── state_manager.py         # Per-symbol state tracking (unchanged)
 ```
 
