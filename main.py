@@ -950,7 +950,14 @@ async def refresh_ema_states(req: RefreshStatesRequest):
                 return res
             return df
 
-        symbols = [s.upper() for s in (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])]
+        import re
+        def normalize_symbol(sym: str) -> str:
+            cleaned = sym.strip().lstrip('$')
+            cleaned = re.sub(r"[^A-Za-z0-9\.\-_=^]", "", cleaned)
+            return cleaned.upper()
+
+        raw_syms = (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])
+        symbols = [normalize_symbol(s) for s in raw_syms if normalize_symbol(s)]
         updated: List[Dict[str, Any]] = []
         errors: List[Dict[str, Any]] = []
         for sym in symbols:
