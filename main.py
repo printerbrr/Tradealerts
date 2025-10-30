@@ -2,7 +2,7 @@ import os
 import re
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
 import json
@@ -832,6 +832,30 @@ async def get_tracked_symbols():
         "total": len(symbols),
         "has_default": "default" in webhook_manager.webhooks
     }
+
+@app.get("/debug/states", tags=["Debug"])
+async def debug_states(symbol: str = "SPY", all_symbols: bool = False) -> Dict[str, Any]:
+    """
+    Inspect current timeframe states from the database.
+    - symbol: symbol to inspect (default: SPY)
+    - all_symbols: if true, returns summaries for all configured symbols
+    """
+    try:
+        if all_symbols:
+            symbols_list: List[str] = webhook_manager.get_all_symbols()
+            if "SPY" not in symbols_list:
+                symbols_list.append("SPY")
+            out: Dict[str, Any] = {}
+            for s in sorted(set([x.upper() for x in symbols_list])):
+                out[s] = state_manager.get_state_summary(s)
+            return {"mode": "all_symbols", "count": len(out), "data": out}
+        else:
+            s = symbol.upper()
+            summary = state_manager.get_state_summary(s)
+            return {"mode": "single", "symbol": s, "data": summary}
+    except Exception as e:
+        logger.error(f"Failed to collect state summaries: {e}")
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
