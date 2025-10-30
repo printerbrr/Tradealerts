@@ -767,8 +767,10 @@ def _build_ema_summary(symbol: str) -> str:
     lines.append(f"{header}")
     for tf in order:
         if tf in states:
-            status = (states[tf].get('ema_status') or 'UNKNOWN').capitalize()
-            lines.append(f"{pretty_tf(tf)} - {status}")
+            raw = (states[tf].get('ema_status') or 'UNKNOWN').upper()
+            status = raw.capitalize()
+            emoji = '🟢' if raw == 'BULLISH' else ('🔴' if raw == 'BEARISH' else '⚪')
+            lines.append(f"{emoji} {pretty_tf(tf)} - {status}")
     return "\n".join(lines)
 
 # NEW: job to send summary to each configured symbol's webhook
