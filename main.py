@@ -63,6 +63,9 @@ class AddTickerRequest(BaseModel):
     symbol: str
     webhook_url: str
 
+class WebhookUpdateRequest(BaseModel):
+    webhook_url: str
+
 class RefreshStatesRequest(BaseModel):
     symbols: List[str] = []
     timeframes: List[str] = ["5MIN","15MIN","30MIN","1HR","4HR","1DAY"]
@@ -149,7 +152,7 @@ async def root():
         "mode": "production"
     }
 
-@app.post("/webhook/sms", tags=["Ingest"]) 
+@app.post("/webhook/sms", tags=["Ingest"], include_in_schema=False) 
 async def receive_sms(request: Request):
     """
     Webhook endpoint to receive SMS messages forwarded from Tasker
@@ -768,10 +771,39 @@ TIME: {display_time}"""
         if response.status_code == 204:
             logger.info(f"Discord alert sent to {symbol} webhook successfully")
         else:
-            logger.error(f"Failed to send Discord alert: {response.status_code}")
+            # Log detailed error information
+            error_msg = f"Failed to send Discord alert: {response.status_code}"
+            
+            # Try to get response body for more details
+            try:
+                response_text = response.text
+                if response_text:
+                    error_msg += f" - Response: {response_text[:200]}"
+            except:
+                pass
+            
+            # Log webhook URL status (masked for security)
+            webhook_display = webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url
+            error_msg += f" - Webhook: {webhook_display}"
+            
+            # Specific error messages for common status codes
+            if response.status_code == 404:
+                error_msg += " - Webhook URL not found. Possible causes: webhook deleted, invalid URL, or URL malformed."
+            elif response.status_code == 401:
+                error_msg += " - Unauthorized. Webhook URL may be invalid."
+            elif response.status_code == 400:
+                error_msg += " - Bad request. Check payload format."
+            
+            logger.error(error_msg)
             
     except Exception as e:
         logger.error(f"Error sending Discord alert: {str(e)}")
+        # Also log the webhook URL (masked) if available
+        try:
+            webhook_display = webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url
+            logger.error(f"Webhook URL used: {webhook_display}")
+        except:
+            pass
 
 # NEW: helper to post simple messages to a webhook
 def _post_discord_message(webhook_url: str, content: str) -> bool:
@@ -877,12 +909,12 @@ async def admin_send_daily_ema_summaries():
         logger.error(f"admin send daily summaries failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/config", tags=["Config"]) 
+@app.get("/config", tags=["Config"], include_in_schema=False) 
 async def get_config():
     """Get current configuration"""
     return alert_config
 
-@app.post("/config", tags=["Config"]) 
+@app.post("/config", tags=["Config"], include_in_schema=False) 
 async def update_config(config: AlertConfig):
     """Update configuration"""
     global alert_config
@@ -890,7 +922,7 @@ async def update_config(config: AlertConfig):
     logger.info(f"Configuration updated: {config}")
     return {"status": "success", "message": "Configuration updated"}
 
-@app.post("/config/time_filter", tags=["Config"]) 
+@app.post("/config/time_filter", tags=["Config"], include_in_schema=False) 
 async def set_time_filter(toggle: TimeFilterToggle):
     """Enable/disable business-hours alert window (5 AM - 1 PM PT)."""
     # when enabled=True we enforce window → ignore_time_filter=False
@@ -898,7 +930,7 @@ async def set_time_filter(toggle: TimeFilterToggle):
     logger.info(f"Time filter enabled={toggle.enabled}")
     return {"status": "success", "enabled": toggle.enabled}
 
-@app.post("/config/test-filters", tags=["Config"]) 
+@app.post("/config/test-filters", tags=["Config"], include_in_schema=False) 
 async def toggle_test_filters(toggle: TestFiltersToggle):
     """
     Toggle both time filter (5am-1pm PT) and weekend filter for testing purposes.
@@ -1001,15 +1033,11 @@ async def get_symbol_webhook(symbol: str):
     return {"symbol": symbol.upper(), "webhook_configured": False}
 
 @app.post("/webhooks/{symbol}", tags=["Webhooks"]) 
-async def set_symbol_webhook(symbol: str, request: Request):
+async def set_symbol_webhook(symbol: str, request: WebhookUpdateRequest):
     """Set or update webhook URL for a symbol"""
     symbol_upper = symbol.upper()
     
-    try:
-        data = await request.json()
-        webhook_url = data.get('webhook_url', '').strip()
-    except:
-        webhook_url = ""
+    webhook_url = request.webhook_url.strip()
     
     if not webhook_url:
         raise HTTPException(status_code=400, detail="webhook_url is required in request body")
@@ -1183,14 +1211,14 @@ async def refresh_ema_states(req: RefreshStatesRequest):
         return {"status": "error", "updated": [], "errors": [{"error": str(e)}]}
 
 # Alerts toggle endpoints
-@app.get("/alerts/{symbol}", tags=["Alerts"]) 
+@app.get("/alerts/{symbol}", tags=["Alerts"], include_in_schema=False) 
 async def get_alert_toggles(symbol: str):
     """Return per-ticker alert tag toggles, e.g., C1, CALL1, P1, PUT1, etc."""
     sym = symbol.upper()
     alert_toggle_manager.ensure_defaults(sym)
     return {"symbol": sym, "toggles": alert_toggle_manager.get(sym)}
 
-@app.post("/alerts/{symbol}", tags=["Alerts"]) 
+@app.post("/alerts/{symbol}", tags=["Alerts"], include_in_schema=False) 
 async def set_alert_toggles(symbol: str, toggles: Dict[str, bool] = Body(...)):
     """Set multiple toggles at once. Body: { "C1": true, "CALL1": false, ... }"""
     sym = symbol.upper()
