@@ -1,6 +1,7 @@
 import os
 import re
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import logging
@@ -11,6 +12,7 @@ import json
 from state_manager import state_manager
 from confluence_rules import confluence_rules
 from webhook_manager import webhook_manager
+from alert_toggle_manager import alert_toggle_manager
 
 # NEW: imports for scheduler/timezone
 import asyncio
@@ -122,6 +124,13 @@ try:
     # Initialize webhook manager (will auto-create config if needed)
     webhook_manager.load_webhooks()
     logger.info(f"Webhook manager initialized")
+    # Ensure toggle defaults exist for configured symbols
+    try:
+        symbols_for_toggles = webhook_manager.get_all_symbols() or ["SPY"]
+        for sym in symbols_for_toggles:
+            alert_toggle_manager.ensure_defaults(sym)
+    except Exception as e:
+        logger.warning(f"Toggle defaults init skipped: {e}")
     
 except Exception as e:
     logger.error(f"Failed to initialize state tracking system: {e}")
@@ -568,12 +577,19 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
     # Check if we should send alerts based on time (1 PM - 4:59 AM PST/PDT = no alerts)
     # Allow bypass via config for after-hours testing
+    import pytz
+    from datetime import datetime
+    
+    pacific = pytz.timezone('America/Los_Angeles')
+    current_time_pacific = datetime.now(pacific)
+    
+    # Check for weekend (Saturday=5, Sunday=6) - market is closed
+    weekday = current_time_pacific.weekday()
+    if weekday >= 5:  # Saturday (5) or Sunday (6)
+        logger.info(f"ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
+        return False
+    
     if not alert_config.parameters.get('ignore_time_filter', False):
-        import pytz
-        from datetime import datetime
-        
-        pacific = pytz.timezone('America/Los_Angeles')
-        current_time_pacific = datetime.now(pacific)
         current_hour = current_time_pacific.hour
         
         # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
@@ -638,7 +654,11 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         # Get current time in Pacific timezone (handles PST/PDT automatically)
         pacific = pytz.timezone('America/Los_Angeles')
         server_time_pacific = datetime.now(pacific)
-        display_time = server_time_pacific.strftime("%I:%M %p")
+        # Determine if we're in DST (PDT) or not (PST)
+        from datetime import timedelta
+        dst_offset = server_time_pacific.dst()
+        tz_abbrev = "PDT" if dst_offset and dst_offset != timedelta(0) else "PST"
+        display_time = server_time_pacific.strftime("%I:%M %p") + f" {tz_abbrev}"
             
         # Create different message formats based on alert type
         if parsed.get('action') == 'macd_crossover':
@@ -672,6 +692,11 @@ async def send_discord_alert(log_data: Dict[str, Any]):
 {emoji} {title_tf} MACD Cross - {direction_label}{suffix}
 MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}"""
+
+            # Build toggle tag for MACD using CALL/PUT + timeframe token
+            macd_dir_label = 'CALL' if macd_direction == 'bullish' else 'PUT'
+            macd_suffix = (suffix or '').upper().replace('H', 'H').replace('D', 'D')
+            toggle_tag = f"{macd_dir_label}{macd_suffix}"
         else:
             # EMA Crossover format using confluence with next higher timeframe
             current_tf = (parsed.get('timeframe') or '').upper()
@@ -713,6 +738,13 @@ TIME: {display_time}"""
 {emoji} {title_tf} EMA Cross - {tag}
 MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}"""
+
+            toggle_tag = (tag or '').upper()
+        
+        # Respect per-symbol toggle before sending
+        if toggle_tag and not alert_toggle_manager.is_enabled(symbol, toggle_tag):
+            logger.info(f"ALERT BLOCKED by toggle: {symbol} {toggle_tag}")
+            return
         
         payload = {
             "content": message
@@ -763,7 +795,11 @@ def _build_ema_summary(symbol: str) -> str:
     # Timestamp header in Pacific time
     pacific = pytz.timezone('America/Los_Angeles')
     now_pt = datetime.now(pacific)
-    header = now_pt.strftime("%m/%d/%Y %I:%M %p")
+    # Determine if we're in DST (PDT) or not (PST)
+    from datetime import timedelta
+    dst_offset = now_pt.dst()
+    tz_abbrev = "PDT" if dst_offset and dst_offset != timedelta(0) else "PST"
+    header = now_pt.strftime("%m/%d/%Y %I:%M %p") + f" {tz_abbrev}"
     lines.append(f"{header}")
     for tf in order:
         if tf in states:
@@ -1098,6 +1134,137 @@ async def refresh_ema_states(req: RefreshStatesRequest):
     except Exception as e:
         logger.error(f"refresh_ema_states failed: {e}")
         return {"status": "error", "updated": [], "errors": [{"error": str(e)}]}
+
+# Alerts toggle endpoints
+@app.get("/alerts/{symbol}", tags=["Alerts"]) 
+async def get_alert_toggles(symbol: str):
+    """Return per-ticker alert tag toggles, e.g., C1, CALL1, P1, PUT1, etc."""
+    sym = symbol.upper()
+    alert_toggle_manager.ensure_defaults(sym)
+    return {"symbol": sym, "toggles": alert_toggle_manager.get(sym)}
+
+@app.post("/alerts/{symbol}", tags=["Alerts"]) 
+async def set_alert_toggles(symbol: str, toggles: Dict[str, bool] = Body(...)):
+    """Set multiple toggles at once. Body: { "C1": true, "CALL1": false, ... }"""
+    sym = symbol.upper()
+    alert_toggle_manager.ensure_defaults(sym)
+    updated = alert_toggle_manager.set_many(sym, toggles or {})
+    return {"symbol": sym, "toggles": updated}
+
+@app.get("/admin/alerts", include_in_schema=False)
+async def admin_alerts_page():
+    html = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Per-Ticker Alert Toggles</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+    .row { display: flex; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+    .sym { font-weight: 600; width: 80px; }
+    .tag { margin: 2px 8px 2px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 10px 0; }
+    button { padding: 6px 10px; margin-left: 8px; }
+    input[type="text"] { padding: 6px 8px; }
+    .muted { color: #666; font-size: 12px; }
+  </style>
+  </head>
+<body>
+  <h2>Per-Ticker Alert Toggles</h2>
+  <div class="row">
+    <input id="newSym" type="text" placeholder="Add symbol (e.g., QQQ)" />
+    <button onclick="addSymbol()">Add</button>
+    <span class="muted">Symbols come from your webhook config; this also primes defaults.</span>
+  </div>
+  <div id="container"></div>
+
+<script>
+async function listSymbols() {
+  const r = await fetch('/symbols');
+  const j = await r.json();
+  const syms = (j.symbols || []);
+  if (!syms.includes('SPY')) syms.unshift('SPY');
+  return Array.from(new Set(syms));
+}
+
+function chunkTags(keys) {
+  const order = ["C","CALL","P","PUT"];
+  const tfs = ["1","5","15","30","1H","2H","4H","1D"];
+  const wanted = [];
+  for (const b of order) for (const tf of tfs) wanted.push((b+tf).toUpperCase());
+  const seen = new Set();
+  const result = [];
+  for (const k of wanted) { if (keys.includes(k) && !seen.has(k)) { result.push(k); seen.add(k);} }
+  for (const k of keys) if (!seen.has(k)) result.push(k);
+  return result;
+}
+
+async function load() {
+  const container = document.getElementById('container');
+  container.innerHTML = '';
+  const symbols = await listSymbols();
+  for (const sym of symbols) {
+    const res = await fetch(`/alerts/${sym}`);
+    const data = await res.json();
+    const toggles = data.toggles || {};
+    const keys = chunkTags(Object.keys(toggles));
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="row"><div class="sym">${sym}</div>
+        <button onclick="save('${sym}')">Save</button>
+      </div>
+      <div class="grid" id="grid-${sym}"></div>
+    `;
+    container.appendChild(card);
+    const grid = card.querySelector(`#grid-${sym}`);
+    for (const k of keys) {
+      const checked = !!toggles[k];
+      const id = `${sym}-${k}`;
+      const div = document.createElement('div');
+      div.className = 'tag';
+      div.innerHTML = `
+        <label><input type="checkbox" id="${id}" ${checked ? 'checked' : ''} /> ${k} </label>
+      `;
+      grid.appendChild(div);
+    }
+  }
+}
+
+async function save(sym) {
+  const grid = document.getElementById(`grid-${sym}`);
+  if (!grid) return;
+  const inputs = grid.querySelectorAll('input[type="checkbox"]');
+  const body = {};
+  inputs.forEach(i => { 
+    const k = i.id.replace(`${sym}-`, '');
+    body[k] = i.checked;
+  });
+  await fetch(`/alerts/${sym}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  alert(`Saved toggles for ${sym}`);
+}
+
+async function addSymbol() {
+  const el = document.getElementById('newSym');
+  const sym = (el.value || '').trim().toUpperCase();
+  if (!sym) return;
+  await fetch(`/alerts/${sym}`);
+  el.value = '';
+  load();
+}
+
+load();
+</script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html, status_code=200)
 
 @app.get("/debug/states", tags=["Debug"]) 
 async def debug_states(symbol: str = "SPY", all_symbols: bool = False) -> Dict[str, Any]:

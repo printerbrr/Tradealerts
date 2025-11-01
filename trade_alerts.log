@@ -476,3 +476,53 @@ To stop market & thinkorswim alerts like this, reply Stop10. To stop all, reply 
 2025-10-24 13:33:12,703 - main - INFO - ALERT FILTERED: Current time 01:33 PM is outside alert hours (5 AM - 1 PM PST/PDT)
 2025-10-24 13:33:21,212 - main - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
 2025-10-24 13:33:21,259 - main - INFO - ALERT FILTERED: Current time 01:33 PM is outside alert hours (5 AM - 1 PM PST/PDT)
+2025-10-28 23:11:31,934 - __main__ - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-28 23:11:31,987 - state_manager - INFO - [DEV] Database initialized: market_states.db
+2025-10-28 23:11:31,987 - __main__ - INFO - State manager initialized with database: market_states.db
+2025-10-28 23:11:31,995 - confluence_rules - INFO - Loaded 3 confluence rules from confluence_rules.json
+2025-10-28 23:11:31,996 - confluence_rules - INFO - Saved 3 confluence rules to confluence_rules.json
+2025-10-28 23:11:31,996 - __main__ - INFO - Enabled MACD next-higher EMA confluence rule
+2025-10-28 23:11:31,996 - __main__ - INFO - Confluence rules engine initialized
+2025-10-28 23:11:31,996 - webhook_manager - INFO - Loaded webhook configuration from discord_webhooks.json
+2025-10-28 23:11:31,996 - webhook_manager - INFO - Webhooks configured for: ['SPY', 'default']
+2025-10-28 23:11:31,996 - __main__ - INFO - Webhook manager initialized
+2025-10-28 23:11:32,165 - __main__ - INFO - ============================================================
+2025-10-28 23:11:32,166 - __main__ - INFO - STARTING TRADE ALERTS SYSTEM v2.0
+2025-10-28 23:11:32,166 - __main__ - INFO - Port: 8000
+2025-10-28 23:11:32,166 - __main__ - INFO - Database: market_states.db
+2025-10-28 23:11:32,166 - __main__ - INFO - Log File: trade_alerts.log
+2025-10-28 23:11:32,166 - __main__ - INFO - ============================================================
+2025-10-30 11:49:56,256 - __main__ - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-30 11:49:56,258 - state_manager - INFO - [DEV] Database initialized: market_states.db
+2025-10-30 11:49:56,258 - __main__ - INFO - State manager initialized with database: market_states.db
+2025-10-30 11:49:56,259 - state_manager - INFO - [DEV] Bootstrap complete: timeframe_states updated/inserted for 0 items from history
+2025-10-30 11:49:56,259 - __main__ - INFO - State bootstrap from history completed
+2025-10-30 11:49:56,260 - confluence_rules - INFO - Loaded 3 confluence rules from confluence_rules.json
+2025-10-30 11:49:56,260 - __main__ - INFO - Confluence rules engine initialized
+2025-10-30 11:49:56,260 - webhook_manager - INFO - Loaded webhook configuration from discord_webhooks.json
+2025-10-30 11:49:56,261 - webhook_manager - INFO - Webhooks configured for: ['SPY', 'default']
+2025-10-30 11:49:56,261 - __main__ - INFO - Webhook manager initialized
+2025-10-30 11:49:56,336 - __main__ - INFO - ============================================================
+2025-10-30 11:49:56,336 - __main__ - INFO - STARTING TRADE ALERTS SYSTEM v2.0
+2025-10-30 11:49:56,337 - __main__ - INFO - Port: 8000
+2025-10-30 11:49:56,338 - __main__ - INFO - Database: market_states.db
+2025-10-30 11:49:56,338 - __main__ - INFO - Log File: trade_alerts.log
+2025-10-30 11:49:56,339 - __main__ - INFO - ============================================================
+2025-10-30 11:49:56,431 - __main__ - INFO - Daily EMA summary scheduler started (06:30 PT)
+2025-10-30 11:53:36,054 - __main__ - INFO - Discord webhook URL loaded: https://discordapp.com/api/webhooks/14304269282000...
+2025-10-30 11:53:36,056 - state_manager - INFO - [DEV] Database initialized: market_states.db
+2025-10-30 11:53:36,056 - __main__ - INFO - State manager initialized with database: market_states.db
+2025-10-30 11:53:36,057 - state_manager - INFO - [DEV] Bootstrap complete: timeframe_states updated/inserted for 0 items from history
+2025-10-30 11:53:36,057 - __main__ - INFO - State bootstrap from history completed
+2025-10-30 11:53:36,057 - confluence_rules - INFO - Loaded 3 confluence rules from confluence_rules.json
+2025-10-30 11:53:36,058 - __main__ - INFO - Confluence rules engine initialized
+2025-10-30 11:53:36,058 - webhook_manager - INFO - Loaded webhook configuration from discord_webhooks.json
+2025-10-30 11:53:36,058 - webhook_manager - INFO - Webhooks configured for: ['SPY', 'default']
+2025-10-30 11:53:36,059 - __main__ - INFO - Webhook manager initialized
+2025-10-30 11:53:36,109 - __main__ - INFO - ============================================================
+2025-10-30 11:53:36,109 - __main__ - INFO - STARTING TRADE ALERTS SYSTEM v2.0
+2025-10-30 11:53:36,111 - __main__ - INFO - Port: 8000
+2025-10-30 11:53:36,112 - __main__ - INFO - Database: market_states.db
+2025-10-30 11:53:36,113 - __main__ - INFO - Log File: trade_alerts.log
+2025-10-30 11:53:36,114 - __main__ - INFO - ============================================================
+2025-10-30 11:53:36,148 - __main__ - INFO - Daily EMA summary scheduler started (06:30 PT)
