@@ -930,7 +930,7 @@ async def set_time_filter(toggle: TimeFilterToggle):
     logger.info(f"Time filter enabled={toggle.enabled}")
     return {"status": "success", "enabled": toggle.enabled}
 
-@app.post("/config/test-filters", tags=["Config"], include_in_schema=False) 
+@app.post("/config/test-filters", tags=["Config"]) 
 async def toggle_test_filters(toggle: TestFiltersToggle):
     """
     Toggle both time filter (5am-1pm PT) and weekend filter for testing purposes.
@@ -956,7 +956,7 @@ async def toggle_test_filters(toggle: TestFiltersToggle):
         }
     }
 
-@app.get("/config/test-filters", tags=["Config"])
+@app.get("/config/test-filters", tags=["Config"], include_in_schema=False)
 async def get_test_filters():
     """Get current test filter settings"""
     return {
