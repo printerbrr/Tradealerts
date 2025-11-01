@@ -50,6 +50,11 @@ class AlertConfig(BaseModel):
 class TimeFilterToggle(BaseModel):
     enabled: bool  # True = enforce time window; False = ignore_time_filter
 
+class TestFiltersToggle(BaseModel):
+    """Toggle both time filter (5am-1pm) and weekend filter for testing"""
+    time_filter_enabled: bool = True  # True = enforce 5am-1pm window; False = ignore
+    weekend_filter_enabled: bool = True  # True = enforce weekend filter; False = ignore
+
 class WebhookMapping(BaseModel):
     symbol: str
     url: str
@@ -584,10 +589,14 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     current_time_pacific = datetime.now(pacific)
     
     # Check for weekend (Saturday=5, Sunday=6) - market is closed
-    weekday = current_time_pacific.weekday()
-    if weekday >= 5:  # Saturday (5) or Sunday (6)
-        logger.info(f"ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
-        return False
+    # Allow bypass via config for testing
+    if alert_config.parameters.get('ignore_weekend_filter', False):
+        logger.info("Weekend filter bypassed via config (ignore_weekend_filter=true)")
+    else:
+        weekday = current_time_pacific.weekday()
+        if weekday >= 5:  # Saturday (5) or Sunday (6)
+            logger.info(f"ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
+            return False
     
     if not alert_config.parameters.get('ignore_time_filter', False):
         current_hour = current_time_pacific.hour
@@ -888,6 +897,44 @@ async def set_time_filter(toggle: TimeFilterToggle):
     alert_config.parameters["ignore_time_filter"] = (not toggle.enabled)
     logger.info(f"Time filter enabled={toggle.enabled}")
     return {"status": "success", "enabled": toggle.enabled}
+
+@app.post("/config/test-filters", tags=["Config"]) 
+async def toggle_test_filters(toggle: TestFiltersToggle):
+    """
+    Toggle both time filter (5am-1pm PT) and weekend filter for testing purposes.
+    
+    - time_filter_enabled: True = enforce 5am-1pm window, False = ignore time filter
+    - weekend_filter_enabled: True = enforce weekend filter, False = ignore weekend filter
+    """
+    # Set time filter
+    alert_config.parameters["ignore_time_filter"] = (not toggle.time_filter_enabled)
+    
+    # Set weekend filter
+    alert_config.parameters["ignore_weekend_filter"] = (not toggle.weekend_filter_enabled)
+    
+    logger.info(f"Test filters updated: time_filter_enabled={toggle.time_filter_enabled}, weekend_filter_enabled={toggle.weekend_filter_enabled}")
+    
+    return {
+        "status": "success",
+        "time_filter_enabled": toggle.time_filter_enabled,
+        "weekend_filter_enabled": toggle.weekend_filter_enabled,
+        "current_config": {
+            "ignore_time_filter": alert_config.parameters.get("ignore_time_filter", False),
+            "ignore_weekend_filter": alert_config.parameters.get("ignore_weekend_filter", False)
+        }
+    }
+
+@app.get("/config/test-filters", tags=["Config"])
+async def get_test_filters():
+    """Get current test filter settings"""
+    return {
+        "time_filter_enabled": not alert_config.parameters.get("ignore_time_filter", False),
+        "weekend_filter_enabled": not alert_config.parameters.get("ignore_weekend_filter", False),
+        "current_config": {
+            "ignore_time_filter": alert_config.parameters.get("ignore_time_filter", False),
+            "ignore_weekend_filter": alert_config.parameters.get("ignore_weekend_filter", False)
+        }
+    }
 
 # Confluence Rules Management Endpoints
 @app.get("/confluence/rules", include_in_schema=False)
