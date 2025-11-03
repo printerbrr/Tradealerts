@@ -871,11 +871,33 @@ async def _daily_scheduler_task():
     pacific = pytz.timezone('America/Los_Angeles')
     while True:
         now = datetime.now(pacific)
+        
+        # Check if it's a weekend (Saturday=5, Sunday=6) - skip sending on weekends
+        weekday = now.weekday()
+        if weekday >= 5:  # Saturday or Sunday
+            # Calculate days until next Monday
+            from datetime import timedelta
+            days_until_monday = (7 - weekday) % 7
+            if days_until_monday == 0:  # Already Monday (shouldn't happen, but safety check)
+                days_until_monday = 7
+            # Schedule for next Monday at 6:30 AM
+            target = now.replace(hour=6, minute=30, second=0, microsecond=0)
+            target = target + timedelta(days=days_until_monday)
+            seconds = (target - now).total_seconds()
+            logger.info(f"Weekend detected ({now.strftime('%A')}), scheduling next summary for Monday {target.strftime('%Y-%m-%d %I:%M %p %Z')}")
+            await asyncio.sleep(seconds)
+            continue
+        
+        # Calculate target time for today (or next weekday if past 6:30 AM)
         target = now.replace(hour=6, minute=30, second=0, microsecond=0)
         if now >= target:
             # schedule next day
             from datetime import timedelta
             target = target + timedelta(days=1)
+            # If next day is weekend, skip to Monday
+            while target.weekday() >= 5:
+                target = target + timedelta(days=1)
+        
         # sleep until target
         seconds = (target - now).total_seconds()
         try:
@@ -884,8 +906,28 @@ async def _daily_scheduler_task():
             # in case of sleep interruption, retry quickly
             await asyncio.sleep(5)
             continue
+        
+        # After waking up, check if we already ran today (prevent duplicates)
+        now_check = datetime.now(pacific)
+        today_str = now_check.strftime('%Y-%m-%d')
+        last_summary_date = state_manager.get_metadata('last_daily_summary_date')
+        
+        if last_summary_date == today_str:
+            logger.warning(f"Daily EMA summary already sent today ({today_str}), skipping duplicate run")
+            # Schedule for tomorrow (or next weekday)
+            from datetime import timedelta
+            target = now_check.replace(hour=6, minute=30, second=0, microsecond=0) + timedelta(days=1)
+            while target.weekday() >= 5:  # Skip weekends
+                target = target + timedelta(days=1)
+            seconds = (target - now_check).total_seconds()
+            await asyncio.sleep(seconds)
+            continue
+        
         try:
             await send_daily_ema_summaries()
+            # Mark as sent for today (prevents duplicates)
+            state_manager.set_metadata('last_daily_summary_date', today_str)
+            logger.info(f"Daily EMA summary completed for {today_str}")
         except Exception as e:
             logger.error(f"Daily EMA summary job failed: {e}")
             # continue loop for next day

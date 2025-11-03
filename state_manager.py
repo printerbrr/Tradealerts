@@ -67,6 +67,15 @@ class StateManager:
                     )
                 ''')
                 
+                # Create metadata table for system-level tracking (e.g., last summary date)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS system_metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
                 conn.commit()
                 logger.info(f"[DEV] Database initialized: {self.database_path}")
                 
@@ -468,6 +477,31 @@ class StateManager:
                 logger.info(f"[DEV] Bootstrap complete: timeframe_states updated/inserted for {touched} items from history")
         except Exception as e:
             logger.error(f"[DEV] Bootstrap from history failed: {e}")
+    
+    def get_metadata(self, key: str) -> Optional[str]:
+        """Get a metadata value by key"""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT value FROM system_metadata WHERE key = ?', (key,))
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            logger.error(f"[DEV] Failed to get metadata {key}: {e}")
+            return None
+    
+    def set_metadata(self, key: str, value: str):
+        """Set a metadata value by key"""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO system_metadata (key, value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                ''', (key, value))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"[DEV] Failed to set metadata {key}: {e}")
 
 # Global state manager instance
 state_manager = StateManager()
