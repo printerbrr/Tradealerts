@@ -672,13 +672,42 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         tz_abbrev = "PDT" if dst_offset and dst_offset != timedelta(0) else "PST"
         display_time = server_time_pacific.strftime("%I:%M %p") + f" {tz_abbrev}"
             
+        # Helper function to determine number of emojis based on timeframe
+        def get_emoji_count(timeframe: str) -> int:
+            """Return number of emojis based on timeframe:
+            1min, 5min: 1 emoji
+            15min, 30min: 2 emojis
+            1h, 2h: 3 emojis
+            4h, D: 4 emojis
+            """
+            if not timeframe:
+                return 1
+            tf = timeframe.upper()
+            if tf in ['1MIN', '5MIN']:
+                return 1
+            elif tf in ['15MIN', '30MIN']:
+                return 2
+            elif tf in ['1HR', '2HR']:
+                return 3
+            elif tf in ['4HR', '1DAY', '4H', '1D']:
+                return 4
+            # Default to 1 for unknown timeframes
+            return 1
+        
+        # Helper function to get emoji string based on direction and timeframe
+        def get_emoji_string(direction: str, timeframe: str) -> str:
+            """Get emoji string with correct count based on timeframe"""
+            is_bullish = direction.lower() == 'bullish'
+            emoji_char = '🟢' if is_bullish else '🔴'
+            count = get_emoji_count(timeframe)
+            return emoji_char * count
+            
         # Create different message formats based on alert type
         if parsed.get('action') == 'macd_crossover':
             # MACD: custom compact format using next higher timeframe suffix
             macd_direction = (parsed.get('macd_direction', 'bullish') or 'bullish').lower()
             # Map direction to Call/Put
             direction_label = 'Call' if macd_direction == 'bullish' else 'Put'
-            emoji = '🟢' if macd_direction == 'bullish' else '🔴'
 
             current_tf = (parsed.get('timeframe') or '').upper()
             next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
@@ -699,11 +728,16 @@ async def send_discord_alert(log_data: Dict[str, Any]):
 
             suffix = suffix_from_timeframe(next_tf)
             title_tf = current_tf or 'N/A'
+            # Special case: 5MIN MACD should use 2 emojis (like 15MIN/30MIN)
+            emoji_count = 2 if current_tf == '5MIN' else get_emoji_count(current_tf)
+            emoji_char = '🟢' if macd_direction == 'bullish' else '🔴'
+            emoji_str = emoji_char * emoji_count
 
-            message = f"""@everyone
-{emoji} {title_tf} MACD Cross - {direction_label}{suffix}
+            message = f"""{emoji_str}
+{title_tf} MACD Cross - {direction_label}{suffix}
 MARK: ${parsed.get('price', 'N/A')}
-TIME: {display_time}"""
+TIME: {display_time}
+@everyone"""
 
             # Build toggle tag for MACD using CALL/PUT + timeframe token
             macd_dir_label = 'CALL' if macd_direction == 'bullish' else 'PUT'
@@ -714,7 +748,6 @@ TIME: {display_time}"""
             current_tf = (parsed.get('timeframe') or '').upper()
             next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
             ema_direction = (parsed.get('ema_direction', 'bullish') or 'bullish').lower()
-            emoji = '🟢' if ema_direction == 'bullish' else '🔴'
 
             # Determine suffix token for the current timeframe (e.g., 30, 1H, 1D)
             def suffix_from_timeframe_for_tag(tf: str) -> str:
@@ -746,10 +779,12 @@ TIME: {display_time}"""
                 tag = f"PUT{tag_suffix}" if higher_ema_status == 'BEARISH' else f"P{tag_suffix}"
 
             title_tf = current_tf or 'N/A'
-            message = f"""@everyone
-{emoji} {title_tf} EMA Cross - {tag}
+            emoji_str = get_emoji_string(ema_direction, current_tf)
+            message = f"""{emoji_str}
+{title_tf} EMA Cross - {tag}
 MARK: ${parsed.get('price', 'N/A')}
-TIME: {display_time}"""
+TIME: {display_time}
+@everyone"""
 
             toggle_tag = (tag or '').upper()
         
@@ -971,6 +1006,19 @@ async def set_time_filter(toggle: TimeFilterToggle):
     alert_config.parameters["ignore_time_filter"] = (not toggle.enabled)
     logger.info(f"Time filter enabled={toggle.enabled}")
     return {"status": "success", "enabled": toggle.enabled}
+
+@app.post("/config/test-mode", tags=["Config"], include_in_schema=False)
+async def enable_test_mode():
+    """One-click test mode: disables both time filter and weekend filter for testing."""
+    alert_config.parameters["ignore_time_filter"] = True
+    alert_config.parameters["ignore_weekend_filter"] = True
+    logger.info("Test mode enabled: both time filter and weekend filter disabled")
+    return {
+        "status": "success",
+        "message": "Test mode enabled",
+        "time_filter_disabled": True,
+        "weekend_filter_disabled": True
+    }
 
 @app.post("/config/test-filters", tags=["Config"]) 
 async def toggle_test_filters(toggle: TestFiltersToggle):
