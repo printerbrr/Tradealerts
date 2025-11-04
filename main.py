@@ -7,6 +7,12 @@ from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
 import json
+import hashlib
+import hmac
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import state tracking modules
 from state_manager import state_manager
@@ -135,6 +141,15 @@ if PRICE_ALERT_WEBHOOK_URL:
 else:
     logger.warning("PRICE_ALERT_WEBHOOK_URL not found - price alerts will be disabled until configured")
 
+# Discord Bot Configuration (for slash commands)
+DISCORD_BOT_PUBLIC_KEY = os.environ.get("DISCORD_BOT_PUBLIC_KEY")
+DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
+
+if DISCORD_BOT_PUBLIC_KEY:
+    logger.info("Discord bot public key loaded (slash commands enabled)")
+else:
+    logger.info("DISCORD_BOT_PUBLIC_KEY not configured - slash commands will be disabled")
+
 # Initialize state tracking system
 try:
     # Initialize database with production path
@@ -188,6 +203,183 @@ async def root():
         "version": "2.0.0",
         "mode": "production"
     }
+
+# Discord Bot Interaction Handlers
+def verify_discord_signature(body: bytes, signature: str, timestamp: str) -> bool:
+    """
+    Verify Discord interaction signature using Ed25519
+    """
+    try:
+        from nacl.signing import VerifyKey
+        from nacl.exceptions import BadSignatureError
+        
+        if not DISCORD_BOT_PUBLIC_KEY:
+            logger.warning("Discord bot public key not configured - cannot verify signature")
+            return False
+        
+        # Reconstruct the message that was signed
+        message = timestamp.encode() + body
+        
+        # Convert hex public key to bytes
+        public_key_bytes = bytes.fromhex(DISCORD_BOT_PUBLIC_KEY)
+        
+        # Create verify key
+        verify_key = VerifyKey(public_key_bytes)
+        
+        # Convert hex signature to bytes
+        signature_bytes = bytes.fromhex(signature)
+        
+        # Verify signature
+        verify_key.verify(message, signature_bytes)
+        return True
+        
+    except BadSignatureError:
+        logger.warning("Discord signature verification failed")
+        return False
+    except Exception as e:
+        logger.error(f"Error verifying Discord signature: {e}")
+        return False
+
+async def handle_discord_command(command_name: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Route Discord slash commands to appropriate handlers
+    Returns response data for Discord
+    """
+    try:
+        if command_name == "dev-mode":
+            # Extract enabled option
+            enabled = False
+            for option in options:
+                if option.get("name") == "enabled":
+                    enabled = option.get("value", False)
+                    break
+            
+            # Set dev mode
+            alert_config.parameters["dev_mode"] = enabled
+            
+            # Also set ignore filters when dev mode is enabled
+            if enabled:
+                alert_config.parameters["ignore_time_filter"] = True
+                alert_config.parameters["ignore_weekend_filter"] = True
+                message = "Dev mode enabled ✅\n- Using dev webhook\n- Time/weekend filters bypassed"
+            else:
+                message = "Dev mode disabled ✅\n- Using production webhooks\n- Normal filters active"
+            
+            logger.info(f"Discord command: dev-mode set to {enabled}")
+            
+            return {
+                "type": 4,  # CHANNEL_MESSAGE_WITH_SOURCE
+                "data": {
+                    "content": message
+                }
+            }
+        
+        elif command_name == "test-mode":
+            # Enable test mode (disables both filters)
+            alert_config.parameters["ignore_time_filter"] = True
+            alert_config.parameters["ignore_weekend_filter"] = True
+            logger.info("Discord command: test-mode enabled")
+            
+            return {
+                "type": 4,
+                "data": {
+                    "content": "Test mode enabled ✅\n- Time/weekend filters disabled"
+                }
+            }
+        
+        elif command_name == "status":
+            # Return current status
+            dev_mode = alert_config.parameters.get("dev_mode", False)
+            time_filter = not alert_config.parameters.get("ignore_time_filter", False)
+            weekend_filter = not alert_config.parameters.get("ignore_weekend_filter", False)
+            
+            status_msg = f"""**System Status:**
+• Dev Mode: {'🟢 ON' if dev_mode else '🔴 OFF'}
+• Time Filter: {'🟢 ON' if time_filter else '🔴 OFF'} (5am-1pm PT)
+• Weekend Filter: {'🟢 ON' if weekend_filter else '🔴 OFF'}"""
+            
+            return {
+                "type": 4,
+                "data": {
+                    "content": status_msg
+                }
+            }
+        
+        else:
+            return {
+                "type": 4,
+                "data": {
+                    "content": f"❌ Unknown command: {command_name}"
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error handling Discord command {command_name}: {e}")
+        return {
+            "type": 4,
+            "data": {
+                "content": f"❌ Error processing command: {str(e)}"
+            }
+        }
+
+@app.post("/discord/interactions", tags=["Discord"])
+async def discord_interactions(request: Request):
+    """
+    Discord interaction webhook endpoint for slash commands
+    Handles signature verification and routes commands
+    """
+    try:
+        # Get raw body for signature verification
+        body = await request.body()
+        body_str = body.decode('utf-8')
+        
+        # Get signature headers
+        signature = request.headers.get("X-Signature-Ed25519", "")
+        timestamp = request.headers.get("X-Signature-Timestamp", "")
+        
+        # Verify signature if public key is configured
+        if DISCORD_BOT_PUBLIC_KEY:
+            if not verify_discord_signature(body, signature, timestamp):
+                logger.warning("Discord interaction signature verification failed")
+                raise HTTPException(status_code=401, detail="Invalid signature")
+        
+        # Parse interaction payload
+        try:
+            interaction = json.loads(body_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Discord interaction JSON: {e}")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        
+        # Handle PING (Discord verification)
+        if interaction.get("type") == 1:
+            return {"type": 1}
+        
+        # Handle APPLICATION_COMMAND (slash command)
+        if interaction.get("type") == 2:
+            data = interaction.get("data", {})
+            command_name = data.get("name", "")
+            options = data.get("options", [])
+            
+            logger.info(f"Discord command received: {command_name} with options: {options}")
+            
+            # Route command to handler
+            response = await handle_discord_command(command_name, options)
+            return response
+        
+        # Unknown interaction type
+        logger.warning(f"Unknown Discord interaction type: {interaction.get('type')}")
+        return {
+            "type": 4,
+            "data": {
+                "content": "❌ Unknown interaction type"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing Discord interaction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/webhook/sms", tags=["Ingest"], include_in_schema=False) 
 async def receive_sms(request: Request):
