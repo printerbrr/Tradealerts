@@ -402,6 +402,9 @@ async def receive_sms(request: Request):
             alert_triggered = analyze_data(parsed_data)
             if alert_triggered:
                 await send_discord_alert(log_data)
+            else:
+                # Log skipped alerts that don't match known categories
+                logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")
         
         return {"status": "success", "message": "SMS processed successfully"}
         
@@ -687,6 +690,7 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
         logger.info(f"ALERT FILTERED: Confluence requirements not met for {symbol}")
         return False
     
+    # Only allow specific categorized alerts: MACD and EMA crossovers
     # Primary focus: MACD Crossover detection
     if parsed_data.get("action") == "macd_crossover":
         logger.info("MACD CROSSOVER DETECTED! Triggering Discord alert")
@@ -697,16 +701,13 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
         logger.info("EMA CROSSOVER DETECTED! Triggering Discord alert")
         return True
     
-    # Tertiary: High-confidence Schwab alerts
-    if parsed_data.get("alert_type") == "schwab_alert" and parsed_data.get("confidence") == "high":
-        logger.info("HIGH CONFIDENCE SCHWAB ALERT! Triggering Discord alert")
-        return True
-    
-    # Fallback: Any trade signal
-    if parsed_data.get("action") == "trade_signal":
-        logger.info("TRADE SIGNAL DETECTED! Triggering Discord alert")
-        return True
-    
+    # All other alerts are skipped (not categorized into known alert types)
+    # This includes:
+    # - High-confidence Schwab alerts that aren't MACD/EMA crossovers
+    # - Trade signals that aren't MACD/EMA crossovers
+    # - Testing alerts (e.g., HOOKTRADESRVOL2)
+    # - Any other uncategorized alerts
+    logger.info(f"ALERT NOT CATEGORIZED: action={parsed_data.get('action')}, alert_type={parsed_data.get('alert_type')}, confidence={parsed_data.get('confidence')}")
     return False
 
 async def send_discord_alert(log_data: Dict[str, Any]):
