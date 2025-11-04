@@ -352,7 +352,27 @@ async def receive_sms(request: Request):
         
         logger.info(f"Received SMS from {sender}: {message}")
         
-        # Parse the SMS data
+        # Check if this is a price alert (bypass time/weekend filters)
+        message_lower = message.lower()
+        is_price_alert = (
+            "mark is at or above" in message_lower or 
+            "mark is at or below" in message_lower
+        )
+        
+        if is_price_alert:
+            # Route to price alert handler (bypasses time/weekend filters)
+            logger.info("Detected price alert in SMS - routing to price alert handler")
+            parsed_data = parse_price_alert(message)
+            
+            # Send to Discord using price alert webhook
+            success = await send_price_alert_to_discord(parsed_data)
+            
+            if success:
+                return {"status": "success", "message": "Price alert processed and sent to Discord"}
+            else:
+                return {"status": "error", "message": "Price alert processed but failed to send to Discord"}
+        
+        # Parse the SMS data for regular alerts
         parsed_data = parse_sms_data(message)
         
         # Log the parsed data
