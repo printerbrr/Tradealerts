@@ -141,6 +141,28 @@ if PRICE_ALERT_WEBHOOK_URL:
 else:
     logger.warning("PRICE_ALERT_WEBHOOK_URL not found - price alerts will be disabled until configured")
 
+# Dev Mode Webhook Configuration
+DEV_MODE_WEBHOOK_URL = os.environ.get("DEV_MODE_WEBHOOK_URL")
+
+# If not in environment, try loading from config file
+if not DEV_MODE_WEBHOOK_URL:
+    try:
+        dev_webhook_config_file = "dev_mode_webhook.txt"
+        if os.path.exists(dev_webhook_config_file):
+            with open(dev_webhook_config_file, "r") as f:
+                DEV_MODE_WEBHOOK_URL = f.read().strip()
+                if DEV_MODE_WEBHOOK_URL:
+                    logger.info(f"Dev mode webhook URL loaded from config file: {DEV_MODE_WEBHOOK_URL[:50]}...")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to load dev mode webhook from config file: {e}")
+
+if DEV_MODE_WEBHOOK_URL:
+    logger.info(f"Dev mode webhook URL loaded: {DEV_MODE_WEBHOOK_URL[:50]}...")
+else:
+    logger.info("DEV_MODE_WEBHOOK_URL not configured - dev mode will use production webhooks if enabled")
+
 # Discord Bot Configuration (for slash commands)
 DISCORD_BOT_PUBLIC_KEY = os.environ.get("DISCORD_BOT_PUBLIC_KEY")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
@@ -944,8 +966,17 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         parsed = log_data['parsed_data']
         symbol = parsed.get('symbol', 'SPY').upper()
         
-        # Get webhook URL for this symbol
-        webhook_url = webhook_manager.get_webhook(symbol)
+        # Check if dev mode is enabled - if so, use dev webhook
+        if alert_config.parameters.get('dev_mode', False):
+            webhook_url = DEV_MODE_WEBHOOK_URL
+            if not webhook_url:
+                logger.warning("Dev mode enabled but DEV_MODE_WEBHOOK_URL not configured - falling back to production webhook")
+                webhook_url = webhook_manager.get_webhook(symbol)
+            else:
+                logger.info(f"DEV MODE: Using dev webhook for {symbol}")
+        else:
+            # Get webhook URL for this symbol (production mode)
+            webhook_url = webhook_manager.get_webhook(symbol)
         
         if not webhook_url:
             logger.warning(f"No Discord webhook configured for {symbol}")
@@ -1183,6 +1214,31 @@ async def send_daily_ema_summaries():
     symbols = webhook_manager.get_all_symbols()
     if not symbols:
         symbols = ["SPY"]
+    
+    # Check if dev mode is enabled - if so, use dev webhook for all summaries
+    if alert_config.parameters.get('dev_mode', False):
+        webhook_url = DEV_MODE_WEBHOOK_URL
+        if not webhook_url:
+            logger.warning("Dev mode enabled but DEV_MODE_WEBHOOK_URL not configured - falling back to production webhooks")
+            webhook_url = None  # Will use production webhooks per symbol below
+        else:
+            logger.info(f"DEV MODE: Using dev webhook for EMA summaries")
+            # Send combined summary to dev webhook
+            summary_lines = []
+            for sym in symbols:
+                summary_text = _build_ema_summary(sym)
+                summary_lines.append(f"**{sym} EMA States**\n```{summary_text}```")
+            
+            if summary_lines:
+                combined_content = "\n\n".join(summary_lines)
+                ok = _post_discord_message(webhook_url, combined_content)
+                if ok:
+                    logger.info(f"Daily EMA summary sent to dev webhook for {len(symbols)} symbol(s)")
+                else:
+                    logger.warning(f"Failed to send daily EMA summary to dev webhook")
+            return
+    
+    # Production mode - send to each symbol's webhook
     for sym in symbols:
         url = webhook_manager.get_webhook(sym)
         if not url:
