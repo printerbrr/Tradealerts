@@ -305,6 +305,31 @@ async def handle_discord_command(command_name: str, options: Dict[str, Any]) -> 
                 }
             }
         
+        elif command_name == "ema-summary":
+            # Trigger the existing EMA summary endpoint
+            try:
+                await send_daily_ema_summaries()
+                logger.info("Discord command: ema-summary triggered - summaries sent to webhooks")
+                
+                symbols = webhook_manager.get_all_symbols()
+                if not symbols:
+                    symbols = ["SPY"]
+                
+                return {
+                    "type": 4,
+                    "data": {
+                        "content": f"✅ EMA summaries sent to {len(symbols)} configured webhook channel(s)"
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Error sending EMA summaries via Discord command: {e}")
+                return {
+                    "type": 4,
+                    "data": {
+                        "content": f"❌ Error sending EMA summaries: {str(e)}"
+                    }
+                }
+        
         else:
             return {
                 "type": 4,

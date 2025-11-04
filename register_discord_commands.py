@@ -80,6 +80,10 @@ commands = [
     {
         "name": "status",
         "description": "Show current system status (dev mode, filters, etc.)"
+    },
+    {
+        "name": "ema-summary",
+        "description": "Send EMA summary to all configured webhook channels"
     }
 ]
 
