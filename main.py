@@ -1488,14 +1488,23 @@ def parse_price_alert(message: str) -> Dict[str, Any]:
         parsed["direction"] = f"AT OR {direction_raw}"
     
     # Extract alert level: $ followed by digits with optional decimal
-    alert_level_match = re.search(r'\$(\d+\.?\d*)', message)
+    # Handle trailing periods or punctuation
+    alert_level_match = re.search(r'\$(\d+(?:\.\d+)?)', message)
     if alert_level_match:
-        parsed["alert_level"] = f"${alert_level_match.group(1)}"
+        alert_value = alert_level_match.group(1)
+        # Strip any trailing periods that might have been captured
+        alert_value = alert_value.rstrip('.')
+        parsed["alert_level"] = f"${alert_value}"
     
     # Extract mark price: "Mark = " followed by digits with optional decimal
-    mark_match = re.search(r'Mark\s*=\s*(\d+\.?\d*)', message, re.IGNORECASE)
+    # Handle trailing periods or punctuation that might follow the number
+    # Pattern matches number up to whitespace, punctuation, or end of string
+    mark_match = re.search(r'Mark\s*=\s*(\d+(?:\.\d+)?)', message, re.IGNORECASE)
     if mark_match:
-        parsed["mark"] = mark_match.group(1)
+        mark_value = mark_match.group(1)
+        # Strip any trailing periods that might have been captured
+        mark_value = mark_value.rstrip('.')
+        parsed["mark"] = mark_value
     
     logger.info(f"Parsed price alert: {parsed}")
     return parsed
