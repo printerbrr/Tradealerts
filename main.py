@@ -411,9 +411,13 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             parsed["symbol"] = symbol_match.group(1)
         
         # Extract price (MARK = value) - be more specific to avoid false matches
-        price_match = re.search(r'MARK\s*=\s*([\d.]+)', message, re.IGNORECASE)
+        # Handle trailing periods or punctuation that might follow the number
+        price_match = re.search(r'MARK\s*=\s*(\d+(?:\.\d+)?)', message, re.IGNORECASE)
         if price_match:
-            parsed["price"] = float(price_match.group(1))
+            price_value = price_match.group(1)
+            # Strip any trailing periods that might have been captured
+            price_value = price_value.rstrip('.')
+            parsed["price"] = float(price_value)
         
         # Extract timeframe - handle all formats: 1MIN/1M, 5MIN/5M, 15MIN/15M, 30MIN/30M, 1HR/1H/1HOUR, 2HR/2H/2HOUR, 4HR/4H/4HOUR, 1D/1DAY/1 DAY
         tf_match = re.search(r'(\d+(?:\s+)?(?:MIN|M|HR|HOUR|H|DAY|D))\s*TF', message, re.IGNORECASE)
@@ -455,9 +459,13 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             parsed["trigger_time"] = time_match.group(1)
         
         # Extract study details
-        study_match = re.search(r'STUDY\s*=\s*([\d.]+)', message, re.IGNORECASE)
+        # Handle trailing periods or punctuation
+        study_match = re.search(r'STUDY\s*=\s*(\d+(?:\.\d+)?)', message, re.IGNORECASE)
         if study_match:
-            parsed["study_details"] = study_match.group(1)
+            study_value = study_match.group(1)
+            # Strip any trailing periods that might have been captured
+            study_value = study_value.rstrip('.')
+            parsed["study_details"] = study_value
         
         # Detect MACD crossover signals first
         macd_keywords = ["macdhistogramcrossover", "macd crossover", "macd cross"]
@@ -529,16 +537,19 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
         
         # Look for price patterns
         price_patterns = [
-            r'\$(\d+\.?\d*)',      # $150.50
-            r'at \$(\d+\.?\d*)',   # at $150.50
-            r'price.*?(\d+\.?\d*)', # price 150.50
-            r'(\d+\.?\d*)\s*\$'    # 150.50 $
+            r'\$(\d+(?:\.\d+)?)',      # $150.50
+            r'at \$(\d+(?:\.\d+)?)',   # at $150.50
+            r'price.*?(\d+(?:\.\d+)?)', # price 150.50
+            r'(\d+(?:\.\d+)?)\s*\$'    # 150.50 $
         ]
         
         for pattern in price_patterns:
             price_match = re.search(pattern, message, re.IGNORECASE)
             if price_match:
-                parsed["price"] = float(price_match.group(1))
+                price_value = price_match.group(1)
+                # Strip any trailing periods that might have been captured
+                price_value = price_value.rstrip('.')
+                parsed["price"] = float(price_value)
                 break
     
     return parsed
