@@ -337,21 +337,28 @@ async def discord_interactions(request: Request):
         signature = request.headers.get("X-Signature-Ed25519", "")
         timestamp = request.headers.get("X-Signature-Timestamp", "")
         
+        # Log incoming request for debugging
+        logger.info(f"Discord interaction received - signature present: {bool(signature)}, timestamp present: {bool(timestamp)}")
+        
         # Verify signature if public key is configured
         if DISCORD_BOT_PUBLIC_KEY:
             if not verify_discord_signature(body, signature, timestamp):
-                logger.warning("Discord interaction signature verification failed")
+                logger.warning(f"Discord interaction signature verification failed - signature: {signature[:20]}..., timestamp: {timestamp}")
                 raise HTTPException(status_code=401, detail="Invalid signature")
+        else:
+            logger.warning("DISCORD_BOT_PUBLIC_KEY not configured - signature verification disabled")
         
         # Parse interaction payload
         try:
             interaction = json.loads(body_str)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Discord interaction JSON: {e}")
+            logger.error(f"Body received: {body_str[:200]}")
             raise HTTPException(status_code=400, detail="Invalid JSON")
         
-        # Handle PING (Discord verification)
+        # Handle PING (Discord verification) - must respond within 3 seconds
         if interaction.get("type") == 1:
+            logger.info("Discord PING received - responding with PONG")
             return {"type": 1}
         
         # Handle APPLICATION_COMMAND (slash command)
