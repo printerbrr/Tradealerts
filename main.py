@@ -109,17 +109,12 @@ else:
     logger.warning("DISCORD_WEBHOOK_URL not found in environment or config file")
 
 # Price Alert Webhook Configuration (separate from regular alerts)
+# Load from environment variable first, then from webhook manager (discord_webhooks.json)
 PRICE_ALERT_WEBHOOK_URL = os.environ.get("PRICE_ALERT_WEBHOOK_URL")
 
-# If not in environment, try to load from config file
+# If not in environment, try to load from webhook manager
 if not PRICE_ALERT_WEBHOOK_URL:
-    try:
-        price_alert_config_file = "price_alert_webhook.txt"
-        if os.path.exists(price_alert_config_file):
-            with open(price_alert_config_file, "r") as f:
-                PRICE_ALERT_WEBHOOK_URL = f.read().strip()
-    except FileNotFoundError:
-        pass
+    PRICE_ALERT_WEBHOOK_URL = webhook_manager.get_price_alert_webhook()
 
 if PRICE_ALERT_WEBHOOK_URL:
     logger.info(f"Price alert webhook URL loaded: {PRICE_ALERT_WEBHOOK_URL[:50]}...")
@@ -1664,8 +1659,11 @@ async def receive_price_alert(alert: PriceAlertMessage):
 @app.get("/config/price-alert-webhook", tags=["Config"])
 async def get_price_alert_webhook():
     """Get current price alert webhook URL configuration"""
-    if PRICE_ALERT_WEBHOOK_URL:
-        masked_url = f"{PRICE_ALERT_WEBHOOK_URL[:50]}..." if len(PRICE_ALERT_WEBHOOK_URL) > 50 else PRICE_ALERT_WEBHOOK_URL
+    # Check both global variable and webhook manager (in case it was updated)
+    webhook_url = PRICE_ALERT_WEBHOOK_URL or webhook_manager.get_price_alert_webhook()
+    
+    if webhook_url:
+        masked_url = f"{webhook_url[:50]}..." if len(webhook_url) > 50 else webhook_url
         return {
             "configured": True,
             "webhook_preview": masked_url
@@ -1681,7 +1679,7 @@ async def set_price_alert_webhook(request: PriceAlertWebhookRequest):
     Set or update the price alert webhook URL.
     
     This webhook is separate from the regular alert webhooks and is used
-    specifically for price alerts.
+    specifically for price alerts. Stored in discord_webhooks.json alongside other webhooks.
     """
     global PRICE_ALERT_WEBHOOK_URL
     
@@ -1691,10 +1689,8 @@ async def set_price_alert_webhook(request: PriceAlertWebhookRequest):
         if not webhook_url:
             raise HTTPException(status_code=400, detail="webhook_url is required")
         
-        # Save to config file
-        price_alert_config_file = "price_alert_webhook.txt"
-        with open(price_alert_config_file, "w") as f:
-            f.write(webhook_url)
+        # Save to webhook manager (discord_webhooks.json)
+        webhook_manager.set_price_alert_webhook(webhook_url)
         
         PRICE_ALERT_WEBHOOK_URL = webhook_url
         logger.info(f"Price alert webhook URL updated: {webhook_url[:50]}...")

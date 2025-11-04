@@ -28,15 +28,35 @@ class WebhookManager:
                     self.webhooks = config.get('webhooks', {})
                 logger.info(f"Loaded webhook configuration from {self.config_file}")
                 logger.info(f"Webhooks configured for: {list(self.webhooks.keys())}")
+                # Migrate price alert webhook from old file if needed
+                self.migrate_price_alert_webhook()
             else:
                 # Create default config with SPY webhook from discord_config.txt
                 self.create_default_config()
                 logger.info(f"Created default webhook configuration: {self.config_file}")
+                # Migrate price alert webhook from old file if needed
+                self.migrate_price_alert_webhook()
         except Exception as e:
             logger.error(f"Failed to load webhook configuration: {e}")
             self.webhooks = {}
             # Try to load from old discord_config.txt
             self.load_legacy_config()
+            # Migrate price alert webhook from old file if needed
+            self.migrate_price_alert_webhook()
+    
+    def migrate_price_alert_webhook(self):
+        """Migrate price alert webhook from old price_alert_webhook.txt file to JSON"""
+        price_alert_file = "price_alert_webhook.txt"
+        if os.path.exists(price_alert_file) and not self.get_price_alert_webhook():
+            try:
+                with open(price_alert_file, "r") as f:
+                    webhook_url = f.read().strip()
+                    if webhook_url:
+                        self.webhooks["PRICE_ALERT"] = webhook_url
+                        self.save_webhooks()
+                        logger.info("Migrated price alert webhook from price_alert_webhook.txt to discord_webhooks.json")
+            except Exception as e:
+                logger.warning(f"Failed to migrate price alert webhook: {e}")
     
     def create_default_config(self):
         """Create default webhook configuration"""
@@ -129,8 +149,8 @@ class WebhookManager:
             logger.error(f"Failed to save webhook configuration: {e}")
     
     def get_all_symbols(self) -> list:
-        """Get list of all configured symbols (excluding default)"""
-        return [s for s in self.webhooks.keys() if s != "default"]
+        """Get list of all configured symbols (excluding default and PRICE_ALERT)"""
+        return [s for s in self.webhooks.keys() if s not in ["default", "PRICE_ALERT", "price_alert"]]
     
     def get_config(self) -> Dict[str, str]:
         """Get full webhook configuration"""
@@ -146,6 +166,16 @@ class WebhookManager:
         old_url = self.webhooks.get(symbol)
         self.set_webhook(symbol, webhook_url)
         return old_url is not None  # Returns True if updating, False if adding new
+    
+    def get_price_alert_webhook(self) -> Optional[str]:
+        """Get price alert webhook URL"""
+        return self.webhooks.get("PRICE_ALERT") or self.webhooks.get("price_alert")
+    
+    def set_price_alert_webhook(self, webhook_url: str):
+        """Set or update price alert webhook URL"""
+        self.webhooks["PRICE_ALERT"] = webhook_url
+        self.save_webhooks()
+        logger.info("Updated price alert webhook")
 
 # Global webhook manager instance
 webhook_manager = WebhookManager()
