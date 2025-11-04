@@ -1,6 +1,7 @@
 # Sensitive configuration files
 discord_config.txt
 discord_webhooks.json
+price_alert_webhook.txt
 
 # Python
 __pycache__/

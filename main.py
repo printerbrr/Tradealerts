@@ -72,6 +72,16 @@ class RefreshStatesRequest(BaseModel):
     ema_pairs: List[List[int]] = [[9,21]]
     lookback_days: int = 30
 
+class PriceAlertMessage(BaseModel):
+    """Data model for incoming price alert messages"""
+    message: str
+    sender: Optional[str] = None
+    timestamp: Optional[str] = None
+
+class PriceAlertWebhookRequest(BaseModel):
+    """Request model for setting price alert webhook URL"""
+    webhook_url: str
+
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
 
@@ -97,6 +107,24 @@ if discord_webhook_url:
     logger.info(f"Discord webhook URL loaded: {discord_webhook_url[:50]}...")
 else:
     logger.warning("DISCORD_WEBHOOK_URL not found in environment or config file")
+
+# Price Alert Webhook Configuration (separate from regular alerts)
+PRICE_ALERT_WEBHOOK_URL = os.environ.get("PRICE_ALERT_WEBHOOK_URL")
+
+# If not in environment, try to load from config file
+if not PRICE_ALERT_WEBHOOK_URL:
+    try:
+        price_alert_config_file = "price_alert_webhook.txt"
+        if os.path.exists(price_alert_config_file):
+            with open(price_alert_config_file, "r") as f:
+                PRICE_ALERT_WEBHOOK_URL = f.read().strip()
+    except FileNotFoundError:
+        pass
+
+if PRICE_ALERT_WEBHOOK_URL:
+    logger.info(f"Price alert webhook URL loaded: {PRICE_ALERT_WEBHOOK_URL[:50]}...")
+else:
+    logger.warning("PRICE_ALERT_WEBHOOK_URL not found - price alerts will be disabled until configured")
 
 # Initialize state tracking system
 try:
@@ -1177,128 +1205,14 @@ async def add_ticker(req: AddTickerRequest):
         logger.debug(f"ensure_symbol_exists skipped: {e}")
     return {"status": "success", "symbol": sym}
 
-@app.post("/admin/refresh-ema-states", tags=["Admin"]) 
+@app.post("/admin/refresh-ema-states", tags=["Admin"], include_in_schema=False) 
 async def refresh_ema_states(req: RefreshStatesRequest):
-    """Pull candles via yfinance and update EMA direction per symbol/timeframe."""
-    try:
-        import time
-        import yfinance as yf
-        import pandas as pd
-        import requests as rq
-
-        # Map app TF to Yahoo base interval; resample where needed (e.g., 4HR)
-        BASE_INTERVAL = {"5MIN":"5m","15MIN":"15m","30MIN":"30m","1HR":"60m","4HR":"60m","1DAY":"1d"}
-
-        def effective_period_days(tf: str, requested_days: int) -> int:
-            # Yahoo intraday limits: up to 60d for <=60m intervals
-            return min(requested_days, 60) if tf in ("5MIN","15MIN","30MIN","1HR","4HR") else requested_days
-
-        # Shared session with headers reduces JSONDecode issues/rate-limits
-        session = rq.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradeAlerts/2.0",
-            "Accept": "application/json, text/javascript, */*; q=0.01"
-        })
-
-        def fetch_history(sym: str, tf: str, days: int, retries: int = 2) -> pd.DataFrame:
-            interval = BASE_INTERVAL.get(tf.upper(), "60m")
-            period_days = effective_period_days(tf.upper(), days)
-            for attempt in range(retries + 1):
-                try:
-                    df = yf.download(
-                        sym,
-                        period=f"{period_days}d",
-                        interval=interval,
-                        progress=False,
-                        auto_adjust=False,
-                        threads=False,
-                        session=session
-                    )
-                    if df is not None and not df.empty:
-                        return df
-                except Exception as e:
-                    # fallback: try Ticker().history on next loop
-                    time.sleep(0.8 * (attempt + 1))
-                try:
-                    hist = yf.Ticker(sym, session=session).history(period=f"{period_days}d", interval=interval, actions=False, auto_adjust=False, prepost=False)
-                    if hist is not None and not hist.empty:
-                        return hist
-                except Exception:
-                    pass
-            return pd.DataFrame()
-
-        def to_timeframe(df: pd.DataFrame, tf: str) -> pd.DataFrame:
-            tfu = tf.upper()
-            if tfu == "4HR":
-                # Resample 60m to 4H
-                if not isinstance(df.index, pd.DatetimeIndex):
-                    df.index = pd.to_datetime(df.index)
-                # Build robust agg dict for common Yahoo columns
-                agg = {}
-                if "Open" in df.columns:
-                    agg["Open"] = "first"
-                if "High" in df.columns:
-                    agg["High"] = "max"
-                if "Low" in df.columns:
-                    agg["Low"] = "min"
-                if "Close" in df.columns:
-                    agg["Close"] = "last"
-                if "Adj Close" in df.columns:
-                    agg["Adj Close"] = "last"
-                if "Volume" in df.columns:
-                    agg["Volume"] = "sum"
-                # Default any other columns to last
-                for col in df.columns:
-                    if col not in agg:
-                        agg[col] = "last"
-                res = df.resample("4h").agg(agg).dropna(how="all")
-                return res
-            return df
-
-        import re
-        def normalize_symbol(sym: str) -> str:
-            cleaned = sym.strip().lstrip('$')
-            cleaned = re.sub(r"[^A-Za-z0-9\.\-_=^]", "", cleaned)
-            return cleaned.upper()
-
-        raw_syms = (req.symbols or webhook_manager.get_all_symbols() or ["SPY"])
-        symbols = [normalize_symbol(s) for s in raw_syms if normalize_symbol(s)]
-        updated: List[Dict[str, Any]] = []
-        errors: List[Dict[str, Any]] = []
-        for sym in symbols:
-            for tf in req.timeframes:
-                try:
-                    raw = fetch_history(sym, tf, req.lookback_days)
-                except Exception as e:
-                    msg = f"Download failed for {sym} {tf}: {e}"
-                    logger.warning(msg)
-                    errors.append({"symbol": sym, "timeframe": tf, "error": str(e)})
-                    continue
-                data = to_timeframe(raw, tf)
-                if data is None or getattr(data, 'empty', True) or 'Close' not in data:
-                    logger.warning(f"No data for {sym} {tf}")
-                    errors.append({"symbol": sym, "timeframe": tf, "error": "no_data"})
-                    continue
-                close = data['Close'].dropna()
-                if close.empty:
-                    logger.warning(f"No close data for {sym} {tf}")
-                    errors.append({"symbol": sym, "timeframe": tf, "error": "no_close"})
-                    continue
-                price = float(close.iloc[-1])
-                for pair in req.ema_pairs:
-                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-                        continue
-                    short, long = int(pair[0]), int(pair[1])
-                    ema_s = close.ewm(span=short, adjust=False).mean()
-                    ema_l = close.ewm(span=long, adjust=False).mean()
-                    direction = "bullish" if float(ema_s.iloc[-1]) > float(ema_l.iloc[-1]) else "bearish"
-                    state_manager.update_timeframe_state(sym, tf, "ema", direction, price)
-                    updated.append({"symbol": sym, "timeframe": tf, "ema_pair": f"{short}/{long}", "direction": direction.upper(), "price": price})
-        status = "success" if updated and not errors else ("partial" if updated else "error")
-        return {"status": status, "updated": updated, "errors": errors}
-    except Exception as e:
-        logger.error(f"refresh_ema_states failed: {e}")
-        return {"status": "error", "updated": [], "errors": [{"error": str(e)}]}
+    """This endpoint is disabled - yfinance and finnhub are no longer supported."""
+    logger.warning("refresh_ema_states endpoint called but is disabled (yfinance/finnhub removed)")
+    raise HTTPException(
+        status_code=503, 
+        detail="This endpoint is disabled. yfinance and finnhub data fetching have been removed. EMA states are only updated via incoming SMS alerts."
+    )
 
 # Alerts toggle endpoints
 @app.get("/alerts/{symbol}", tags=["Alerts"], include_in_schema=False) 
@@ -1329,11 +1243,17 @@ async def admin_alerts_page():
     .row { display: flex; align-items: center; margin: 6px 0; flex-wrap: wrap; }
     .sym { font-weight: 600; width: 80px; }
     .tag { margin: 2px 8px 2px 0; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
     .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 10px 0; }
     button { padding: 6px 10px; margin-left: 8px; }
     input[type="text"] { padding: 6px 8px; }
     .muted { color: #666; font-size: 12px; }
+    .columns-container { display: flex; gap: 20px; margin-top: 10px; }
+    .column { flex: 1; border: 1px solid #eee; border-radius: 4px; padding: 10px; }
+    .column-header { font-weight: 600; font-size: 14px; margin-bottom: 10px; text-align: center; padding-bottom: 8px; border-bottom: 1px solid #ddd; }
+    .column-content { display: flex; flex-direction: column; gap: 4px; }
+    .checkbox-item { display: flex; align-items: center; padding: 4px 0; }
+    .checkbox-item label { display: flex; align-items: center; cursor: pointer; width: 100%; }
+    .checkbox-item input[type="checkbox"] { margin-right: 6px; }
   </style>
   </head>
 <body>
@@ -1354,16 +1274,48 @@ async function listSymbols() {
   return Array.from(new Set(syms));
 }
 
-function chunkTags(keys) {
-  const order = ["C","CALL","P","PUT"];
-  const tfs = ["1","5","15","30","1H","2H","4H","1D"];
-  const wanted = [];
-  for (const b of order) for (const tf of tfs) wanted.push((b+tf).toUpperCase());
-  const seen = new Set();
-  const result = [];
-  for (const k of wanted) { if (keys.includes(k) && !seen.has(k)) { result.push(k); seen.add(k);} }
-  for (const k of keys) if (!seen.has(k)) result.push(k);
-  return result;
+function organizeTags(toggles) {
+  // Timeframes sorted from low to high
+  const tfs = ["1", "5", "15", "30", "1H", "2H", "4H", "1D"];
+  
+  // Organize into three columns: C/P, CALL/PUT, Call/Put
+  const column1 = []; // C/P
+  const column2 = []; // CALL/PUT
+  const column3 = []; // Call/Put
+  
+  for (const tf of tfs) {
+    // Column 1: C/P
+    const cKey = `C${tf}`;
+    const pKey = `P${tf}`;
+    if (toggles.hasOwnProperty(cKey)) {
+      column1.push({ key: cKey, checked: !!toggles[cKey] });
+    }
+    if (toggles.hasOwnProperty(pKey)) {
+      column1.push({ key: pKey, checked: !!toggles[pKey] });
+    }
+    
+    // Column 2: CALL/PUT
+    const callKey = `CALL${tf}`;
+    const putKey = `PUT${tf}`;
+    if (toggles.hasOwnProperty(callKey)) {
+      column2.push({ key: callKey, checked: !!toggles[callKey] });
+    }
+    if (toggles.hasOwnProperty(putKey)) {
+      column2.push({ key: putKey, checked: !!toggles[putKey] });
+    }
+    
+    // Column 3: Call/Put
+    const callKeyMixed = `Call${tf}`;
+    const putKeyMixed = `Put${tf}`;
+    if (toggles.hasOwnProperty(callKeyMixed)) {
+      column3.push({ key: callKeyMixed, checked: !!toggles[callKeyMixed] });
+    }
+    if (toggles.hasOwnProperty(putKeyMixed)) {
+      column3.push({ key: putKeyMixed, checked: !!toggles[putKeyMixed] });
+    }
+  }
+  
+  return { column1, column2, column3 };
 }
 
 async function load() {
@@ -1374,34 +1326,74 @@ async function load() {
     const res = await fetch(`/alerts/${sym}`);
     const data = await res.json();
     const toggles = data.toggles || {};
-    const keys = chunkTags(Object.keys(toggles));
+    const { column1, column2, column3 } = organizeTags(toggles);
+    
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <div class="row"><div class="sym">${sym}</div>
         <button onclick="save('${sym}')">Save</button>
       </div>
-      <div class="grid" id="grid-${sym}"></div>
+      <div class="columns-container" id="columns-${sym}"></div>
     `;
     container.appendChild(card);
-    const grid = card.querySelector(`#grid-${sym}`);
-    for (const k of keys) {
-      const checked = !!toggles[k];
-      const id = `${sym}-${k}`;
+    
+    const columnsContainer = card.querySelector(`#columns-${sym}`);
+    
+    // Column 1: C/P
+    const col1 = document.createElement('div');
+    col1.className = 'column';
+    col1.innerHTML = '<div class="column-header">C/P</div><div class="column-content" id="col1-' + sym + '"></div>';
+    const col1Content = col1.querySelector('#col1-' + sym);
+    for (const item of column1) {
+      const id = `${sym}-${item.key}`;
       const div = document.createElement('div');
-      div.className = 'tag';
+      div.className = 'checkbox-item';
       div.innerHTML = `
-        <label><input type="checkbox" id="${id}" ${checked ? 'checked' : ''} /> ${k} </label>
+        <label><input type="checkbox" id="${id}" ${item.checked ? 'checked' : ''} /> ${item.key}</label>
       `;
-      grid.appendChild(div);
+      col1Content.appendChild(div);
     }
+    columnsContainer.appendChild(col1);
+    
+    // Column 2: CALL/PUT
+    const col2 = document.createElement('div');
+    col2.className = 'column';
+    col2.innerHTML = '<div class="column-header">CALL/PUT</div><div class="column-content" id="col2-' + sym + '"></div>';
+    const col2Content = col2.querySelector('#col2-' + sym);
+    for (const item of column2) {
+      const id = `${sym}-${item.key}`;
+      const div = document.createElement('div');
+      div.className = 'checkbox-item';
+      div.innerHTML = `
+        <label><input type="checkbox" id="${id}" ${item.checked ? 'checked' : ''} /> ${item.key}</label>
+      `;
+      col2Content.appendChild(div);
+    }
+    columnsContainer.appendChild(col2);
+    
+    // Column 3: Call/Put
+    const col3 = document.createElement('div');
+    col3.className = 'column';
+    col3.innerHTML = '<div class="column-header">Call/Put</div><div class="column-content" id="col3-' + sym + '"></div>';
+    const col3Content = col3.querySelector('#col3-' + sym);
+    for (const item of column3) {
+      const id = `${sym}-${item.key}`;
+      const div = document.createElement('div');
+      div.className = 'checkbox-item';
+      div.innerHTML = `
+        <label><input type="checkbox" id="${id}" ${item.checked ? 'checked' : ''} /> ${item.key}</label>
+      `;
+      col3Content.appendChild(div);
+    }
+    columnsContainer.appendChild(col3);
   }
 }
 
 async function save(sym) {
-  const grid = document.getElementById(`grid-${sym}`);
-  if (!grid) return;
-  const inputs = grid.querySelectorAll('input[type="checkbox"]');
+  const columnsContainer = document.getElementById(`columns-${sym}`);
+  if (!columnsContainer) return;
+  const inputs = columnsContainer.querySelectorAll('input[type="checkbox"]');
   const body = {};
   inputs.forEach(i => { 
     const k = i.id.replace(`${sym}-`, '');
@@ -1454,6 +1446,227 @@ async def debug_states(symbol: str = "SPY", all_symbols: bool = False) -> Dict[s
     except Exception as e:
         logger.error(f"Failed to collect state summaries: {e}")
         return {"error": str(e)}
+
+# ============================================================================
+# PRICE ALERT FRAMEWORK
+# ============================================================================
+
+def parse_price_alert(message: str) -> Dict[str, Any]:
+    """
+    Parse incoming Schwab price alert message.
+    
+    Expected format: "SPY mark is at or above $682.58 Mark = 683.32"
+    or: "SPY mark is at or below $682.58 Mark = 683.32"
+    
+    Args:
+        message: Raw price alert message text
+        
+    Returns:
+        Dictionary with parsed price alert data:
+        - symbol: Stock symbol (e.g., "SPY", "QQQ")
+        - direction: "AT OR ABOVE" or "AT OR BELOW"
+        - alert_level: Alert price level (e.g., "$682.58")
+        - mark: Current mark price (e.g., "683.32")
+    """
+    parsed = {
+        "raw_message": message,
+        "symbol": None,
+        "direction": None,
+        "alert_level": None,
+        "mark": None,
+    }
+    
+    # Extract symbol (1-5 uppercase letters before "mark")
+    symbol_match = re.search(r'\b([A-Z]{1,5})\s+mark\s+is', message, re.IGNORECASE)
+    if symbol_match:
+        parsed["symbol"] = symbol_match.group(1).upper()
+    
+    # Extract direction: "at or above" or "at or below"
+    direction_match = re.search(r'at or (above|below)', message, re.IGNORECASE)
+    if direction_match:
+        direction_raw = direction_match.group(1).upper()
+        parsed["direction"] = f"AT OR {direction_raw}"
+    
+    # Extract alert level: $ followed by digits with optional decimal
+    alert_level_match = re.search(r'\$(\d+\.?\d*)', message)
+    if alert_level_match:
+        parsed["alert_level"] = f"${alert_level_match.group(1)}"
+    
+    # Extract mark price: "Mark = " followed by digits with optional decimal
+    mark_match = re.search(r'Mark\s*=\s*(\d+\.?\d*)', message, re.IGNORECASE)
+    if mark_match:
+        parsed["mark"] = mark_match.group(1)
+    
+    logger.info(f"Parsed price alert: {parsed}")
+    return parsed
+
+def format_price_alert_discord(parsed_data: Dict[str, Any]) -> str:
+    """
+    Format parsed price alert data into Discord message format.
+    
+    Format: "{TICKER} is {AT OR ABOVE/AT OR BELOW} {ALERT LEVEL} 
+    
+    MARK: {MARK}"
+    
+    Args:
+        parsed_data: Dictionary with parsed price alert data
+        
+    Returns:
+        Formatted Discord message string
+    """
+    symbol = parsed_data.get("symbol", "N/A")
+    direction = parsed_data.get("direction", "N/A")
+    alert_level = parsed_data.get("alert_level", "N/A")
+    mark = parsed_data.get("mark", "N/A")
+    
+    formatted_message = f"""{symbol} is {direction} {alert_level}
+
+MARK: {mark}"""
+    
+    logger.info(f"Formatted price alert message: {formatted_message[:100]}...")
+    return formatted_message
+
+async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
+    """
+    Send price alert to Discord using the separate price alert webhook.
+    
+    Args:
+        parsed_data: Dictionary with parsed price alert data
+        
+    Returns:
+        True if sent successfully, False otherwise
+    """
+    try:
+        import requests
+        
+        if not PRICE_ALERT_WEBHOOK_URL:
+            logger.warning("Price alert webhook URL not configured - cannot send price alert")
+            return False
+        
+        # Format the alert message
+        formatted_message = format_price_alert_discord(parsed_data)
+        
+        # Send to Discord
+        payload = {
+            "content": formatted_message
+        }
+        
+        response = requests.post(
+            PRICE_ALERT_WEBHOOK_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if response.status_code == 204:
+            logger.info(f"Price alert sent to Discord successfully")
+            return True
+        else:
+            error_msg = f"Failed to send price alert: {response.status_code}"
+            try:
+                response_text = response.text
+                if response_text:
+                    error_msg += f" - Response: {response_text[:200]}"
+            except:
+                pass
+            logger.error(error_msg)
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error sending price alert to Discord: {str(e)}")
+        return False
+
+@app.post("/webhook/price-alert", tags=["Ingest"])
+async def receive_price_alert(alert: PriceAlertMessage):
+    """
+    Webhook endpoint to receive price alert messages.
+    
+    This endpoint receives price alerts, parses them, and sends formatted
+    messages to a separate Discord webhook.
+    """
+    try:
+        message = alert.message
+        sender = alert.sender or "unknown"
+        timestamp = alert.timestamp or datetime.now().isoformat()
+        
+        logger.info(f"Received price alert from {sender}: {message[:100]}...")
+        
+        # Parse the price alert message
+        parsed_data = parse_price_alert(message)
+        
+        # Log the parsed data
+        log_data = {
+            "timestamp": timestamp,
+            "sender": sender,
+            "original_message": message,
+            "parsed_data": parsed_data
+        }
+        
+        logger.info(f"Parsed price alert data: {json.dumps(log_data, indent=2)}")
+        
+        # Send to Discord
+        success = await send_price_alert_to_discord(parsed_data)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": "Price alert processed and sent to Discord"
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Price alert processed but failed to send to Discord"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error processing price alert: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/config/price-alert-webhook", tags=["Config"])
+async def get_price_alert_webhook():
+    """Get current price alert webhook URL configuration"""
+    if PRICE_ALERT_WEBHOOK_URL:
+        masked_url = f"{PRICE_ALERT_WEBHOOK_URL[:50]}..." if len(PRICE_ALERT_WEBHOOK_URL) > 50 else PRICE_ALERT_WEBHOOK_URL
+        return {
+            "configured": True,
+            "webhook_preview": masked_url
+        }
+    return {
+        "configured": False,
+        "message": "Price alert webhook not configured"
+    }
+
+@app.post("/config/price-alert-webhook", tags=["Config"])
+async def set_price_alert_webhook(request: PriceAlertWebhookRequest):
+    """
+    Set or update the price alert webhook URL.
+    
+    This webhook is separate from the regular alert webhooks and is used
+    specifically for price alerts.
+    """
+    global PRICE_ALERT_WEBHOOK_URL
+    
+    try:
+        webhook_url = request.webhook_url.strip()
+        
+        if not webhook_url:
+            raise HTTPException(status_code=400, detail="webhook_url is required")
+        
+        # Save to config file
+        price_alert_config_file = "price_alert_webhook.txt"
+        with open(price_alert_config_file, "w") as f:
+            f.write(webhook_url)
+        
+        PRICE_ALERT_WEBHOOK_URL = webhook_url
+        logger.info(f"Price alert webhook URL updated: {webhook_url[:50]}...")
+        
+        return {
+            "status": "success",
+            "message": "Price alert webhook URL updated"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to update price alert webhook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
