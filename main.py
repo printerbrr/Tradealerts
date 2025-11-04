@@ -1541,7 +1541,8 @@ def format_price_alert_discord(parsed_data: Dict[str, Any]) -> str:
     
     Format: "{TICKER} is {AT OR ABOVE/AT OR BELOW} {ALERT LEVEL} 
     
-    MARK: {MARK}"
+    MARK: ${MARK}
+    @everyone"
     
     Args:
         parsed_data: Dictionary with parsed price alert data
@@ -1556,7 +1557,8 @@ def format_price_alert_discord(parsed_data: Dict[str, Any]) -> str:
     
     formatted_message = f"""{symbol} is {direction} {alert_level}
 
-MARK: {mark}"""
+MARK: ${mark}
+@everyone"""
     
     logger.info(f"Formatted price alert message: {formatted_message[:100]}...")
     return formatted_message
