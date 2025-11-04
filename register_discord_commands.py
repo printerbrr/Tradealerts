@@ -2,8 +2,8 @@
 """
 Discord Slash Command Registration Script
 
-This script registers slash commands with Discord.
-Run once after setting up your bot, or whenever you need to update commands.
+This script registers slash commands with Discord to a specific guild (server).
+Commands will appear immediately in your Discord server (no 1-hour wait).
 
 Usage:
     python register_discord_commands.py
@@ -11,6 +11,7 @@ Usage:
 Requires:
     - DISCORD_BOT_TOKEN environment variable
     - DISCORD_APPLICATION_ID environment variable (or CLIENT_ID from OAuth URL)
+    - DISCORD_GUILD_ID environment variable (your Discord server ID)
 """
 
 import os
@@ -50,6 +51,17 @@ if not APPLICATION_ID:
         print("   Or set DISCORD_OAUTH_URL and we'll extract it")
         sys.exit(1)
 
+# Get guild ID from environment (required for guild-specific commands)
+GUILD_ID = os.environ.get("DISCORD_GUILD_ID")
+if not GUILD_ID:
+    print("❌ ERROR: DISCORD_GUILD_ID environment variable not set")
+    print("   Set it with: export DISCORD_GUILD_ID='your-guild-id'")
+    print("   To get your guild ID:")
+    print("   1. Enable Developer Mode in Discord (Settings > Advanced > Developer Mode)")
+    print("   2. Right-click your Discord server")
+    print("   3. Click 'Copy Server ID'")
+    sys.exit(1)
+
 # Discord API base URL
 DISCORD_API = "https://discord.com/api/v10"
 
@@ -88,11 +100,13 @@ commands = [
 ]
 
 def register_commands():
-    """Register slash commands with Discord"""
-    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/commands"
+    """Register slash commands with Discord to a specific guild (server)"""
+    # Guild-specific commands appear immediately (unlike global commands)
+    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/guilds/{GUILD_ID}/commands"
     
-    print(f"📡 Registering {len(commands)} slash commands...")
+    print(f"📡 Registering {len(commands)} slash commands to guild {GUILD_ID}...")
     print(f"   Application ID: {APPLICATION_ID}")
+    print(f"   Guild ID: {GUILD_ID}")
     print(f"   URL: {url}\n")
     
     try:
@@ -103,9 +117,8 @@ def register_commands():
             print("✅ Successfully registered commands:")
             for cmd in registered:
                 print(f"   • /{cmd['name']} - {cmd['description']}")
-            print("\n💡 Commands are now available in your Discord server!")
-            print("   Note: Global commands can take up to 1 hour to appear")
-            print("   For immediate testing, use guild commands (register to specific server)")
+            print("\n💡 Commands are now available in your Discord server immediately!")
+            print("   (Guild-specific commands appear instantly, no waiting required)")
             return True
         else:
             print(f"❌ Failed to register commands: {response.status_code}")
@@ -117,15 +130,15 @@ def register_commands():
         return False
 
 def list_commands():
-    """List currently registered commands"""
-    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/commands"
+    """List currently registered commands for this guild"""
+    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/guilds/{GUILD_ID}/commands"
     
     try:
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
             commands = response.json()
-            print(f"📋 Currently registered commands ({len(commands)}):")
+            print(f"📋 Currently registered commands for guild {GUILD_ID} ({len(commands)}):")
             for cmd in commands:
                 print(f"   • /{cmd['name']} - {cmd['description']}")
             return True
@@ -139,14 +152,14 @@ def list_commands():
         return False
 
 def delete_all_commands():
-    """Delete all registered commands (for testing)"""
-    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/commands"
+    """Delete all registered commands for this guild (for testing)"""
+    url = f"{DISCORD_API}/applications/{APPLICATION_ID}/guilds/{GUILD_ID}/commands"
     
     try:
         response = requests.put(url, headers=headers, json=[])
         
         if response.status_code == 200:
-            print("✅ All commands deleted")
+            print(f"✅ All commands deleted for guild {GUILD_ID}")
             return True
         else:
             print(f"❌ Failed to delete commands: {response.status_code}")

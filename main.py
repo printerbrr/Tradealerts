@@ -1218,6 +1218,21 @@ async def send_daily_ema_summaries():
     if not symbols:
         symbols = ["SPY"]
     
+    # Check time filter if not in dev mode (dev mode bypasses filters)
+    if not alert_config.parameters.get('dev_mode', False):
+        # Check if time filter is enabled and we're outside allowed hours
+        if not alert_config.parameters.get('ignore_time_filter', False):
+            import pytz
+            from datetime import datetime
+            pacific = pytz.timezone('America/Los_Angeles')
+            current_time_pacific = datetime.now(pacific)
+            current_hour = current_time_pacific.hour
+            
+            # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
+            if 13 <= current_hour or current_hour < 5:
+                logger.info(f"EMA SUMMARY FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+                return
+    
     # Check if dev mode is enabled - if so, use dev webhook for all summaries
     if alert_config.parameters.get('dev_mode', False):
         webhook_url = DEV_MODE_WEBHOOK_URL
@@ -1230,7 +1245,7 @@ async def send_daily_ema_summaries():
             summary_lines = []
             for sym in symbols:
                 summary_text = _build_ema_summary(sym)
-                summary_lines.append(f"**{sym} EMA States**\n```{summary_text}```")
+                summary_lines.append(f"**{sym} EMA States**\n{summary_text}")
             
             if summary_lines:
                 combined_content = "\n\n".join(summary_lines)
