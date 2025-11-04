@@ -279,12 +279,15 @@ async def handle_discord_command(command_name: str, options: Dict[str, Any]) -> 
             # Set dev mode
             alert_config.parameters["dev_mode"] = enabled
             
-            # Also set ignore filters when dev mode is enabled
+            # Set ignore filters based on dev mode state
             if enabled:
                 alert_config.parameters["ignore_time_filter"] = True
                 alert_config.parameters["ignore_weekend_filter"] = True
                 message = "Dev mode enabled ✅\n- Using dev webhook\n- Time/weekend filters bypassed"
             else:
+                # Re-enable filters when dev mode is disabled
+                alert_config.parameters["ignore_time_filter"] = False
+                alert_config.parameters["ignore_weekend_filter"] = False
                 message = "Dev mode disabled ✅\n- Using production webhooks\n- Normal filters active"
             
             logger.info(f"Discord command: dev-mode set to {enabled}")
