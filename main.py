@@ -1574,7 +1574,10 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
     try:
         import requests
         
-        if not PRICE_ALERT_WEBHOOK_URL:
+        # Check both global variable and webhook manager (in case it was updated)
+        webhook_url = PRICE_ALERT_WEBHOOK_URL or webhook_manager.get_price_alert_webhook()
+        
+        if not webhook_url:
             logger.warning("Price alert webhook URL not configured - cannot send price alert")
             return False
         
@@ -1587,7 +1590,7 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
         }
         
         response = requests.post(
-            PRICE_ALERT_WEBHOOK_URL,
+            webhook_url,
             json=payload,
             headers={"Content-Type": "application/json"}
         )
