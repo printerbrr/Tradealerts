@@ -109,12 +109,26 @@ else:
     logger.warning("DISCORD_WEBHOOK_URL not found in environment or config file")
 
 # Price Alert Webhook Configuration (separate from regular alerts)
-# Load from environment variable first, then from webhook manager (discord_webhooks.json)
+# Load from environment variable first, then from webhook manager, then from config file
 PRICE_ALERT_WEBHOOK_URL = os.environ.get("PRICE_ALERT_WEBHOOK_URL")
 
 # If not in environment, try to load from webhook manager
 if not PRICE_ALERT_WEBHOOK_URL:
     PRICE_ALERT_WEBHOOK_URL = webhook_manager.get_price_alert_webhook()
+
+# If still not found, try loading from config file (persistent across redeploys)
+if not PRICE_ALERT_WEBHOOK_URL:
+    try:
+        price_alert_config_file = "price_alert_webhook.txt"
+        if os.path.exists(price_alert_config_file):
+            with open(price_alert_config_file, "r") as f:
+                PRICE_ALERT_WEBHOOK_URL = f.read().strip()
+                if PRICE_ALERT_WEBHOOK_URL:
+                    logger.info(f"Price alert webhook URL loaded from config file: {PRICE_ALERT_WEBHOOK_URL[:50]}...")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to load price alert webhook from config file: {e}")
 
 if PRICE_ALERT_WEBHOOK_URL:
     logger.info(f"Price alert webhook URL loaded: {PRICE_ALERT_WEBHOOK_URL[:50]}...")
@@ -1696,6 +1710,15 @@ async def set_price_alert_webhook(request: PriceAlertWebhookRequest):
         
         # Save to webhook manager (discord_webhooks.json)
         webhook_manager.set_price_alert_webhook(webhook_url)
+        
+        # Also save to persistent config file for reliability across redeploys
+        try:
+            price_alert_config_file = "price_alert_webhook.txt"
+            with open(price_alert_config_file, "w") as f:
+                f.write(webhook_url)
+            logger.info(f"Price alert webhook URL saved to config file: {price_alert_config_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save price alert webhook to config file: {e}")
         
         PRICE_ALERT_WEBHOOK_URL = webhook_url
         logger.info(f"Price alert webhook URL updated: {webhook_url[:50]}...")
