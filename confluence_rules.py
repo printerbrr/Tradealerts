@@ -115,9 +115,10 @@ class ConfluenceRulesEngine:
         """Find rules that apply to the current alert"""
         applicable_rules = []
         
-        alert_timeframe = parsed_data.get('timeframe', '').upper()
+        # Handle None timeframe - convert to empty string
+        alert_timeframe = (parsed_data.get('timeframe') or '').upper()
         alert_action = parsed_data.get('action', '')
-        alert_direction = parsed_data.get('macd_direction', parsed_data.get('ema_direction', '')).upper()
+        alert_direction = (parsed_data.get('macd_direction') or parsed_data.get('ema_direction') or '').upper()
         
         # Determine crossover type
         crossover_type = 'unknown'

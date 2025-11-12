@@ -704,7 +704,8 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             parsed["price"] = float(price_value)
         
         # Extract timeframe - handle all formats: 1MIN/1M, 5MIN/5M, 15MIN/15M, 30MIN/30M, 1HR/1H/1HOUR, 2HR/2H/2HOUR, 4HR/4H/4HOUR, 1D/1DAY/1 DAY
-        tf_match = re.search(r'(\d+(?:\s+)?(?:MIN|M|HR|HOUR|H|DAY|D))\s*TF', message, re.IGNORECASE)
+        # Also handle formats like "5MIN SQUEEZE FIRING" (without TF)
+        tf_match = re.search(r'(\d+(?:\s+)?(?:MIN|M|HR|HOUR|H|DAY|D))(?:\s*TF|\s+SQUEEZE)', message, re.IGNORECASE)
         if tf_match:
             timeframe_raw = tf_match.group(1).strip().upper()
             
@@ -789,6 +790,25 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             else:
                 # Default to bullish if direction not specified
                 parsed["ema_direction"] = "bullish"
+        
+        # Detect Squeeze Firing signals in Schwab alerts
+        elif "squeeze firing" in message_lower:
+            parsed["action"] = "squeeze_firing"
+            # Timeframe should already be extracted above, but ensure it's set if not
+            if not parsed.get("timeframe"):
+                # Try to extract timeframe from squeeze firing format
+                sqz_tf_match = re.search(r'(\d+)(?:MIN|M|HR|HOUR|H|DAY|D)\s+SQUEEZE', message, re.IGNORECASE)
+                if sqz_tf_match:
+                    tf_num = sqz_tf_match.group(1)
+                    tf_unit_match = re.search(rf'{tf_num}(MIN|M|HR|HOUR|H|DAY|D)', message, re.IGNORECASE)
+                    if tf_unit_match:
+                        tf_unit = tf_unit_match.group(1).upper()
+                        if tf_unit in ['M', 'MIN']:
+                            parsed["timeframe"] = f"{tf_num}MIN"
+                        elif tf_unit in ['H', 'HR', 'HOUR']:
+                            parsed["timeframe"] = f"{tf_num}HR"
+                        elif tf_unit in ['D', 'DAY']:
+                            parsed["timeframe"] = f"{tf_num}DAY"
         
         # Set confidence based on study value
         if parsed["study_details"]:
