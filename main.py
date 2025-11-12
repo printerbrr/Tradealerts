@@ -1150,11 +1150,13 @@ TIME: {display_time}
             toggle_tag = f"{macd_dir_label}{macd_suffix}"
         elif parsed.get('action') == 'squeeze_firing':
             # Squeeze Firing: simple format with fire emoji at start, @everyone at end
+            # Get timeframe first (needed for toggle tag)
+            current_tf = (parsed.get('timeframe') or '').upper()
+            
             # Use the original message text exactly as received
             original_message = log_data.get('original_message', '')
             if not original_message:
                 # Fallback: construct from parsed data if original not available
-                current_tf = (parsed.get('timeframe') or '').upper()
                 def pretty_timeframe(tf: str) -> str:
                     if not tf:
                         return 'N/A'
