@@ -1,100 +1,214 @@
 #!/usr/bin/env python3
+"""
+Alert Toggle Manager for Per-Symbol Alert Tag Toggles
+Manages persistent alert toggle settings using SQLite database
+"""
+import sqlite3
 import json
 import os
 import threading
-from typing import Dict
+import logging
+from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AlertToggleManager:
-    def __init__(self, path: str = "alert_toggles.json"):
-        self.path = path
+    def __init__(self, database_path: str = "market_states.db"):
+        self.database_path = database_path
         self._lock = threading.Lock()
-        self._data: Dict[str, Dict[str, bool]] = {}
-        self._load()
-
-    def _load(self):
-        if os.path.exists(self.path):
+        self._migrate_from_json()
+    
+    def _migrate_from_json(self):
+        """Migrate existing JSON data to database if JSON file exists"""
+        json_path = "alert_toggles.json"
+        if not os.path.exists(json_path):
+            return
+        
+        try:
+            with open(json_path, "r") as f:
+                json_data = json.load(f)
+            
+            if not isinstance(json_data, dict):
+                logger.warning("alert_toggles.json has invalid format, skipping migration")
+                return
+            
+            # Check if database already has any toggles
             try:
-                with open(self.path, "r") as f:
-                    raw = json.load(f)
-                self._data = raw if isinstance(raw, dict) else {}
-            except Exception:
-                self._data = {}
-        else:
-            self._data = {}
-
-    def _save(self):
-        tmp = self.path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self._data, f, indent=2)
-        os.replace(tmp, self.path)
+                with sqlite3.connect(self.database_path, timeout=30) as conn:
+                    cursor = conn.cursor()
+                    # Check if table exists first
+                    cursor.execute('''
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name='alert_toggles'
+                    ''')
+                    if cursor.fetchone() is None:
+                        logger.info("alert_toggles table doesn't exist yet, skipping JSON migration")
+                        return
+                    
+                    cursor.execute("SELECT COUNT(*) FROM alert_toggles")
+                    count = cursor.fetchone()[0]
+                    
+                    if count > 0:
+                        logger.info("Database already has alert toggles, skipping JSON migration")
+                        return
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Database not ready for migration check: {e}")
+                return
+            
+            # Migrate JSON data to database
+            migrated_count = 0
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                for symbol, toggles in json_data.items():
+                    if not isinstance(toggles, dict):
+                        continue
+                    symbol = symbol.upper()
+                    for tag, enabled in toggles.items():
+                        if isinstance(enabled, bool):
+                            try:
+                                cursor.execute('''
+                                    INSERT OR REPLACE INTO alert_toggles (symbol, tag, enabled, updated_at)
+                                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                                ''', (symbol, tag, 1 if enabled else 0))
+                                migrated_count += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to migrate toggle {symbol}/{tag}: {e}")
+                
+                conn.commit()
+                logger.info(f"Migrated {migrated_count} alert toggles from JSON to database")
+        
+        except Exception as e:
+            logger.error(f"Failed to migrate alert toggles from JSON: {e}")
 
     def ensure_defaults(self, symbol: str):
-        # Default tags enabled: C, CALL, Call, P, PUT, Put x common timeframes
+        """Ensure default tags are enabled for a symbol"""
+        # Default tags enabled: C, CALL, Call, P, PUT, Put, SQZ x common timeframes
         defaults: Dict[str, bool] = {}
-        bases = ["C", "CALL", "Call", "P", "PUT", "Put"]
+        bases = ["C", "CALL", "Call", "P", "PUT", "Put", "SQZ"]
         tfs = ["1", "5", "15", "30", "1H", "2H", "4H", "1D"]
         for base in bases:
             for tf in tfs:
                 defaults[f"{base}{tf}"] = True
+        
+        sym = symbol.upper()
         with self._lock:
-            sym = symbol.upper()
-            if sym not in self._data:
-                self._data[sym] = defaults
-                self._save()
-            else:
-                # Merge in any missing defaults (e.g., Call/Put for existing symbols)
-                updated = False
-                for key, value in defaults.items():
-                    if key not in self._data[sym]:
-                        self._data[sym][key] = value
-                        updated = True
-                if updated:
-                    self._save()
+            try:
+                with sqlite3.connect(self.database_path, timeout=30) as conn:
+                    cursor = conn.cursor()
+                    
+                    # Check existing toggles for this symbol
+                    cursor.execute('''
+                        SELECT tag FROM alert_toggles WHERE symbol = ?
+                    ''', (sym,))
+                    existing_tags = {row[0] for row in cursor.fetchall()}
+                    
+                    # Insert missing defaults
+                    updated = False
+                    for tag, enabled in defaults.items():
+                        if tag not in existing_tags:
+                            cursor.execute('''
+                                INSERT INTO alert_toggles (symbol, tag, enabled, updated_at)
+                                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                            ''', (sym, tag, 1 if enabled else 0))
+                            updated = True
+                    
+                    conn.commit()
+                    if updated:
+                        logger.debug(f"Added default toggles for {sym}")
+            except Exception as e:
+                logger.error(f"Failed to ensure defaults for {sym}: {e}")
 
     def get(self, symbol: str) -> Dict[str, bool]:
+        """Get all toggles for a symbol"""
         sym = symbol.upper()
         with self._lock:
-            return dict(self._data.get(sym, {}))
+            try:
+                with sqlite3.connect(self.database_path, timeout=30) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT tag, enabled FROM alert_toggles WHERE symbol = ?
+                    ''', (sym,))
+                    results = cursor.fetchall()
+                    return {tag: bool(enabled) for tag, enabled in results}
+            except Exception as e:
+                logger.error(f"Failed to get toggles for {sym}: {e}")
+                return {}
 
     def set_many(self, symbol: str, updates: Dict[str, bool]) -> Dict[str, bool]:
+        """Set multiple toggles at once for a symbol"""
         sym = symbol.upper()
         with self._lock:
-            current = self._data.get(sym, {})
-            for k, v in (updates or {}).items():
-                if isinstance(v, bool):
-                    # Preserve case for "Call" and "Put" bases, uppercase others
-                    key = k
-                    if key.startswith("Call") or key.startswith("Put"):
-                        # Keep mixed case for Call/Put
-                        current[key] = v
-                    else:
-                        # Uppercase for C/P, CALL/PUT
-                        current[k.upper()] = v
-            self._data[sym] = current
-            self._save()
-            return dict(current)
+            try:
+                with sqlite3.connect(self.database_path, timeout=30) as conn:
+                    cursor = conn.cursor()
+                    
+                    for tag, enabled in (updates or {}).items():
+                        if not isinstance(enabled, bool):
+                            continue
+                        
+                        # Preserve case for "Call" and "Put" bases, uppercase others
+                        if tag.startswith("Call") or tag.startswith("Put"):
+                            # Keep mixed case for Call/Put
+                            normalized_tag = tag
+                        else:
+                            # Uppercase for C/P, CALL/PUT
+                            normalized_tag = tag.upper()
+                        
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO alert_toggles (symbol, tag, enabled, updated_at)
+                            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        ''', (sym, normalized_tag, 1 if enabled else 0))
+                    
+                    conn.commit()
+                    
+                    # Return all toggles for this symbol
+                    return self.get(sym)
+            except Exception as e:
+                logger.error(f"Failed to set toggles for {sym}: {e}")
+                return {}
 
     def is_enabled(self, symbol: str, tag: str) -> bool:
+        """Check if a specific tag is enabled for a symbol (defaults to True if not found)"""
         sym = symbol.upper()
         with self._lock:
-            mapping = self._data.get(sym, {})
-            if not mapping:
+            try:
+                with sqlite3.connect(self.database_path, timeout=30) as conn:
+                    cursor = conn.cursor()
+                    
+                    # Check exact case first
+                    cursor.execute('''
+                        SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
+                    ''', (sym, tag))
+                    result = cursor.fetchone()
+                    if result:
+                        return bool(result[0])
+                    
+                    # Check uppercase
+                    cursor.execute('''
+                        SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
+                    ''', (sym, tag.upper()))
+                    result = cursor.fetchone()
+                    if result:
+                        return bool(result[0])
+                    
+                    # Check if it's a Call/Put variant (mixed case)
+                    if tag.startswith("Call") or tag.startswith("Put"):
+                        cursor.execute('''
+                            SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
+                        ''', (sym, tag))
+                        result = cursor.fetchone()
+                        if result:
+                            return bool(result[0])
+                    
+                    # Default to True if not found
+                    return True
+            except Exception as e:
+                logger.error(f"Failed to check toggle for {sym}/{tag}: {e}")
                 return True
-            # Check exact case first, then uppercase fallback
-            if tag in mapping:
-                return mapping[tag]
-            key = tag.upper()
-            if key in mapping:
-                return mapping[key]
-            # Also check if it's a Call/Put variant
-            if tag.startswith("Call") or tag.startswith("Put"):
-                key_mixed = tag
-                if key_mixed in mapping:
-                    return mapping[key_mixed]
-            return mapping.get(key, True)
 
 
-alert_toggle_manager = AlertToggleManager()
-
-
+# Global alert toggle manager instance
+# Will be initialized with correct database path in main.py
+# Using default path initially, will be updated in main.py
+alert_toggle_manager = AlertToggleManager("market_states.db")

@@ -206,8 +206,11 @@ try:
     # Initialize webhook manager (will auto-create config if needed)
     webhook_manager.load_webhooks()
     logger.info(f"Webhook manager initialized")
-    # Ensure toggle defaults exist for configured symbols
+    # Initialize alert toggle manager with same database path as state manager
     try:
+        alert_toggle_manager.database_path = PRODUCTION_DATABASE
+        logger.info(f"Alert toggle manager initialized with database: {PRODUCTION_DATABASE}")
+        # Ensure toggle defaults exist for configured symbols
         symbols_for_toggles = webhook_manager.get_all_symbols() or ["SPY"]
         for sym in symbols_for_toggles:
             alert_toggle_manager.ensure_defaults(sym)
@@ -800,6 +803,56 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             except:
                 parsed["confidence"] = "unknown"
     
+    # Squeeze Firing Detection
+    elif "squeeze firing" in message_lower:
+        parsed["action"] = "squeeze_firing"
+        
+        # Extract timeframe from message - handle formats like "15 min Squeeze Firing", "15MIN Squeeze Firing", etc.
+        # Pattern: number followed by optional space and timeframe unit, then "squeeze"
+        # Try pattern: number + unit + "squeeze" (e.g., "15 min Squeeze")
+        tf_match = re.search(r'(\d+)\s*(min|minute|m|hr|hour|h|day|d)\s+squeeze', message_lower)
+        if not tf_match:
+            # Try pattern at start of message: "15 min" or "15MIN" at beginning
+            tf_match = re.search(r'^(\d+)\s*(min|minute|m|hr|hour|h|day|d)', message_lower)
+        if not tf_match:
+            # Try uppercase format: "15MIN" or "1HR" (case-insensitive search)
+            tf_match = re.search(r'(\d+)(MIN|HR|HOUR|H|DAY|D)', message, re.IGNORECASE)
+        
+        if tf_match:
+            tf_number = tf_match.group(1)
+            tf_unit = tf_match.group(2).lower() if len(tf_match.groups()) > 1 else None
+            
+            # Normalize timeframe format
+            if tf_unit:
+                if tf_unit in ['min', 'minute', 'm']:
+                    parsed["timeframe"] = f"{tf_number}MIN"
+                elif tf_unit in ['hr', 'hour', 'h']:
+                    parsed["timeframe"] = f"{tf_number}HR"
+                elif tf_unit in ['day', 'd']:
+                    parsed["timeframe"] = f"{tf_number}DAY"
+                else:
+                    parsed["timeframe"] = f"{tf_number}MIN"  # Default to MIN
+            else:
+                # No unit found, default to MIN
+                parsed["timeframe"] = f"{tf_number}MIN"
+        
+        # Try to extract symbol from message (optional)
+        symbol_patterns = [
+            r'\b([A-Z]{1,5})\s+.*squeeze',  # Symbol before squeeze
+            r'squeeze.*\b([A-Z]{1,5})\b',   # Symbol after squeeze
+            r'\$([A-Z]{1,5})\b'             # $SYMBOL format
+        ]
+        
+        for pattern in symbol_patterns:
+            symbol_match = re.search(pattern, message, re.IGNORECASE)
+            if symbol_match:
+                parsed["symbol"] = symbol_match.group(1).upper()
+                break
+        
+        # Default to SPY if no symbol found
+        if not parsed["symbol"]:
+            parsed["symbol"] = "SPY"
+    
     # Generic trading signal detection
     elif any(word in message_lower for word in ['buy', 'sell', 'long', 'short', 'alert']):
         parsed["action"] = "trade_signal"
@@ -939,7 +992,7 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
         logger.info(f"ALERT FILTERED: Confluence requirements not met for {symbol}")
         return False
     
-    # Only allow specific categorized alerts: MACD and EMA crossovers
+    # Only allow specific categorized alerts: MACD and EMA crossovers, and Squeeze Firing
     # Primary focus: MACD Crossover detection
     if parsed_data.get("action") == "macd_crossover":
         logger.info("MACD CROSSOVER DETECTED! Triggering Discord alert")
@@ -948,6 +1001,11 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     # Secondary focus: Moving Average Crossover detection
     if parsed_data.get("action") == "moving_average_crossover":
         logger.info("EMA CROSSOVER DETECTED! Triggering Discord alert")
+        return True
+    
+    # Squeeze Firing detection
+    if parsed_data.get("action") == "squeeze_firing":
+        logger.info("SQUEEZE FIRING DETECTED! Triggering Discord alert")
         return True
     
     # All other alerts are skipped (not categorized into known alert types)
@@ -1070,6 +1128,47 @@ TIME: {display_time}
             macd_dir_label = 'CALL' if macd_direction == 'bullish' else 'PUT'
             macd_suffix = (suffix or '').upper().replace('H', 'H').replace('D', 'D')
             toggle_tag = f"{macd_dir_label}{macd_suffix}"
+        elif parsed.get('action') == 'squeeze_firing':
+            # Squeeze Firing: simple format with fire emoji at start, @everyone at end
+            # Use the original message text exactly as received
+            original_message = log_data.get('original_message', '')
+            if not original_message:
+                # Fallback: construct from parsed data if original not available
+                current_tf = (parsed.get('timeframe') or '').upper()
+                def pretty_timeframe(tf: str) -> str:
+                    if not tf:
+                        return 'N/A'
+                    tf = tf.upper()
+                    if tf.endswith('MIN'):
+                        num = tf.replace('MIN', '')
+                        return f"{num} min"
+                    elif tf.endswith('HR'):
+                        num = tf.replace('HR', '')
+                        return f"{num} hr"
+                    elif tf == '1DAY':
+                        return "1 day"
+                    return tf
+                display_tf = pretty_timeframe(current_tf)
+                original_message = f"{display_tf} Squeeze Firing"
+            
+            message = f"""🔥 {original_message}
+@everyone"""
+            
+            # Build toggle tag for Squeeze (e.g., SQZ15, SQZ30, SQZ1H)
+            def timeframe_to_tag_suffix(tf: str) -> str:
+                if not tf:
+                    return ''
+                tf = tf.upper()
+                if tf.endswith('MIN'):
+                    return tf.replace('MIN', '')
+                elif tf.endswith('HR'):
+                    return tf.replace('HR', 'H')
+                elif tf == '1DAY':
+                    return '1D'
+                return tf
+            
+            tag_suffix = timeframe_to_tag_suffix(current_tf)
+            toggle_tag = f"SQZ{tag_suffix}" if tag_suffix else "SQZ"
         else:
             # EMA Crossover format using confluence with next higher timeframe
             current_tf = (parsed.get('timeframe') or '').upper()
