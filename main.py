@@ -646,6 +646,16 @@ async def receive_sms(request: Request):
         
         logger.info(f"Parsed data: {json.dumps(log_data, indent=2)}")
         
+        # Get previous state BEFORE updating (needed for alert conditions)
+        # Store it in parsed_data for use in analyze_data()
+        symbol = parsed_data.get('symbol', 'SPY')
+        timeframe = parsed_data.get('timeframe')
+        if timeframe and parsed_data.get('action') == 'macd_crossover':
+            current_state = state_manager.get_timeframe_state(symbol, timeframe)
+            previous_macd_status = current_state.get('macd_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+            parsed_data['_previous_macd_status'] = previous_macd_status
+            parsed_data['_current_ema_status'] = current_state.get('ema_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+        
         # Update system state based on detected crossovers
         update_system_state(parsed_data)
         
@@ -974,7 +984,17 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
     Analyze parsed data against configured parameters
     Returns True if alert should be triggered
-    Focus: MACD and EMA Crossover detection for tomorrow's trading
+    
+    New Alert Conditions (MACD Crossovers Only):
+    For Bullish "Call" signals:
+    1. Previous MACD status was BEARISH (below 0)
+    2. MACD histogram crosses above 0 (bullish cross)
+    3. Current timeframe EMA is BULLISH (confluence with MACD)
+    
+    For Bearish "Put" signals:
+    1. Previous MACD status was BULLISH (above 0)
+    2. MACD histogram crosses below 0 (bearish cross)
+    3. Current timeframe EMA is BEARISH (confluence with MACD)
     """
     # Check if we should send alerts based on time (1 PM - 4:59 AM PST/PDT = no alerts)
     # Allow bypass via config for after-hours testing
@@ -1004,21 +1024,75 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     else:
         logger.info("Time filter bypassed via config (ignore_time_filter=true)")
     
-    # Check confluence rules before sending alerts
-    symbol = parsed_data.get('symbol', 'SPY')
-    current_states = state_manager.get_all_states(symbol)
-    
-    if not confluence_rules.evaluate_alert(parsed_data, current_states):
-        logger.info(f"ALERT FILTERED: Confluence requirements not met for {symbol}")
+    # Handle MACD crossovers with new conditions
+    if parsed_data.get("action") == "macd_crossover":
+        # Get required data for MACD alert conditions
+        symbol = parsed_data.get('symbol', 'SPY')
+        timeframe = parsed_data.get('timeframe')
+        macd_direction = parsed_data.get('macd_direction', '').upper()
+        
+        if not timeframe:
+            logger.info(f"ALERT FILTERED: No timeframe found for MACD crossover")
+            return False
+        
+        if macd_direction not in ['BULLISH', 'BEARISH']:
+            logger.info(f"ALERT FILTERED: Invalid MACD direction: {macd_direction}")
+            return False
+        
+        # Get previous MACD status (before the update that just happened)
+        previous_macd_status = parsed_data.get('_previous_macd_status', 'UNKNOWN')
+        
+        # Get current EMA status (before the update)
+        current_ema_status = parsed_data.get('_current_ema_status', 'UNKNOWN')
+        
+        # If we don't have the previous state cached, try to get it from history
+        if previous_macd_status == 'UNKNOWN':
+            previous_macd_status = state_manager.get_previous_macd_status(symbol, timeframe) or 'UNKNOWN'
+        
+        # If we still don't have EMA status, get it from current state
+        if current_ema_status == 'UNKNOWN':
+            current_state = state_manager.get_timeframe_state(symbol, timeframe)
+            current_ema_status = current_state.get('ema_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+        
+        logger.info(f"MACD ALERT CHECK: {symbol} {timeframe} - Previous MACD: {previous_macd_status}, Current MACD: {macd_direction}, Current EMA: {current_ema_status}")
+        
+        # Check conditions for Bullish "Call" signal
+        if macd_direction == 'BULLISH':
+            # Condition 1: Previous MACD was BEARISH (below 0)
+            if previous_macd_status != 'BEARISH':
+                logger.info(f"ALERT FILTERED: Bullish MACD crossover requires previous status BEARISH, but was {previous_macd_status}")
+                return False
+            
+            # Condition 2: MACD crosses above 0 (bullish cross) - already verified by macd_direction == 'BULLISH'
+            # Condition 3: Current timeframe EMA must be BULLISH (confluence)
+            if current_ema_status != 'BULLISH':
+                logger.info(f"ALERT FILTERED: Bullish MACD crossover requires EMA confluence (BULLISH), but EMA is {current_ema_status}")
+                return False
+            
+            logger.info(f"MACD CALL SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bullish Call signal")
+            return True
+        
+        # Check conditions for Bearish "Put" signal
+        elif macd_direction == 'BEARISH':
+            # Condition 1: Previous MACD was BULLISH (above 0)
+            if previous_macd_status != 'BULLISH':
+                logger.info(f"ALERT FILTERED: Bearish MACD crossover requires previous status BULLISH, but was {previous_macd_status}")
+                return False
+            
+            # Condition 2: MACD crosses below 0 (bearish cross) - already verified by macd_direction == 'BEARISH'
+            # Condition 3: Current timeframe EMA must be BEARISH (confluence)
+            if current_ema_status != 'BEARISH':
+                logger.info(f"ALERT FILTERED: Bearish MACD crossover requires EMA confluence (BEARISH), but EMA is {current_ema_status}")
+                return False
+            
+            logger.info(f"MACD PUT SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bearish Put signal")
+            return True
+        
+        # Should not reach here, but safety check
+        logger.info(f"ALERT FILTERED: MACD direction not BULLISH or BEARISH: {macd_direction}")
         return False
     
-    # Only allow specific categorized alerts: MACD and EMA crossovers, and Squeeze Firing
-    # Primary focus: MACD Crossover detection
-    if parsed_data.get("action") == "macd_crossover":
-        logger.info("MACD CROSSOVER DETECTED! Triggering Discord alert")
-        return True
-    
-    # Secondary focus: Moving Average Crossover detection
+    # EMA crossovers trigger alerts as before (no new conditions)
     if parsed_data.get("action") == "moving_average_crossover":
         logger.info("EMA CROSSOVER DETECTED! Triggering Discord alert")
         return True
@@ -1109,29 +1183,28 @@ async def send_discord_alert(log_data: Dict[str, Any]):
             
         # Create different message formats based on alert type
         if parsed.get('action') == 'macd_crossover':
-            # MACD: custom compact format using next higher timeframe suffix
+            # MACD: custom compact format using current timeframe suffix (same timeframe EMA confluence)
             macd_direction = (parsed.get('macd_direction', 'bullish') or 'bullish').lower()
             # Map direction to Call/Put
             direction_label = 'Call' if macd_direction == 'bullish' else 'Put'
 
             current_tf = (parsed.get('timeframe') or '').upper()
-            next_tf = state_manager.get_next_higher_timeframe(current_tf) if current_tf else None
 
             def suffix_from_timeframe(tf: str) -> str:
                 if not tf:
                     return ''
                 tf = tf.upper()
                 if tf.endswith('MIN'):
-                    # '15MIN' -> '15'
+                    # '5MIN' -> '5', '15MIN' -> '15', '30MIN' -> '30'
                     return tf.replace('MIN', '')
                 if tf.endswith('HR'):
-                    # '1HR' -> '1h', '2HR' -> '2h', '4HR' -> '4h'
-                    return tf.replace('HR', 'h').lower()
+                    # '1HR' -> '1H', '2HR' -> '2H', '4HR' -> '4H'
+                    return tf.replace('HR', 'H')
                 if tf == '1DAY':
-                    return '1d'
+                    return '1D'
                 return tf
 
-            suffix = suffix_from_timeframe(next_tf)
+            suffix = suffix_from_timeframe(current_tf)
             title_tf = current_tf or 'N/A'
             # Special case: 5MIN MACD should use 2 emojis (like 15MIN/30MIN)
             emoji_count = 2 if current_tf == '5MIN' else get_emoji_count(current_tf)
@@ -1144,9 +1217,9 @@ MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}
 @everyone"""
 
-            # Build toggle tag for MACD using CALL/PUT + timeframe token
+            # Build toggle tag for MACD using CALL/PUT + current timeframe token
             macd_dir_label = 'CALL' if macd_direction == 'bullish' else 'PUT'
-            macd_suffix = (suffix or '').upper().replace('H', 'H').replace('D', 'D')
+            macd_suffix = suffix.upper() if suffix else ''
             toggle_tag = f"{macd_dir_label}{macd_suffix}"
         elif parsed.get('action') == 'squeeze_firing':
             # Squeeze Firing: simple format with fire emoji at start, @everyone at end

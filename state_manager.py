@@ -76,6 +76,19 @@ class StateManager:
                     )
                 ''')
                 
+                # Create alert_toggles table for per-symbol alert tag toggles
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS alert_toggles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        symbol TEXT NOT NULL,
+                        tag TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(symbol, tag)
+                    )
+                ''')
+                
                 conn.commit()
                 logger.info(f"[DEV] Database initialized: {self.database_path}")
                 
@@ -250,6 +263,48 @@ class StateManager:
                     
         except Exception as e:
             logger.error(f"[DEV] Failed to get timeframe state: {e}")
+            return None
+    
+    def get_previous_macd_status(self, symbol: str, timeframe: str) -> Optional[str]:
+        """
+        Get the previous MACD status before the most recent update.
+        Returns the old_status from the most recent state_history entry for MACD.
+        If no history exists, returns None.
+        """
+        try:
+            symbol = symbol.upper()
+            timeframe = timeframe.upper()
+            
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                # Get the most recent MACD crossover entry to find the previous status
+                cursor.execute('''
+                    SELECT old_status, new_status, timestamp
+                    FROM state_history
+                    WHERE symbol = ? AND timeframe = ? AND crossover_type = 'macd'
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                ''', (symbol, timeframe))
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    # Return the old_status (what it was before the most recent change)
+                    return result[0]
+                else:
+                    # No history - check current state to infer previous
+                    # If current is BULLISH, previous might have been BEARISH or UNKNOWN
+                    # If current is BEARISH, previous might have been BULLISH or UNKNOWN
+                    current_state = self.get_timeframe_state(symbol, timeframe)
+                    if current_state:
+                        current_macd = current_state.get('macd_status', 'UNKNOWN')
+                        # If current is UNKNOWN, we can't determine previous
+                        # Otherwise, we don't know what it was before
+                        return None
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"[DEV] Failed to get previous MACD status: {e}")
             return None
     
     def get_all_states(self, symbol: str) -> Dict[str, Dict[str, Any]]:
