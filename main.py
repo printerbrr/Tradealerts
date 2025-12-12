@@ -1217,9 +1217,10 @@ MARK: ${parsed.get('price', 'N/A')}
 TIME: {display_time}
 @everyone"""
 
-            # Build toggle tag for MACD using CALL/PUT + current timeframe token
-            macd_dir_label = 'CALL' if macd_direction == 'bullish' else 'PUT'
-            macd_suffix = suffix.upper() if suffix else ''
+            # Build toggle tag for MACD using Call/Put (mixed case) + current timeframe token
+            # Note: Call5/Put5 are for MACD, CALL5/PUT5 are for EMA with confluence
+            macd_dir_label = 'Call' if macd_direction == 'bullish' else 'Put'
+            macd_suffix = suffix if suffix else ''
             toggle_tag = f"{macd_dir_label}{macd_suffix}"
         elif parsed.get('action') == 'squeeze_firing':
             # Squeeze Firing: simple format with fire emoji at start, @everyone at end
@@ -1310,9 +1311,12 @@ TIME: {display_time}
             toggle_tag = (tag or '').upper()
         
         # Respect per-symbol toggle before sending
-        if toggle_tag and not alert_toggle_manager.is_enabled(symbol, toggle_tag):
-            logger.info(f"ALERT BLOCKED by toggle: {symbol} {toggle_tag}")
-            return
+        if toggle_tag:
+            is_enabled = alert_toggle_manager.is_enabled(symbol, toggle_tag)
+            logger.info(f"TOGGLE CHECK: {symbol} {toggle_tag} -> enabled={is_enabled}")
+            if not is_enabled:
+                logger.info(f"ALERT BLOCKED by toggle: {symbol} {toggle_tag}")
+                return
         
         payload = {
             "content": message

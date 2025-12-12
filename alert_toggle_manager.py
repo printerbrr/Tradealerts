@@ -176,30 +176,13 @@ class AlertToggleManager:
                 with sqlite3.connect(self.database_path, timeout=30) as conn:
                     cursor = conn.cursor()
                     
-                    # Check exact case first
+                    # Check exact case first (case-sensitive matching)
                     cursor.execute('''
                         SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
                     ''', (sym, tag))
                     result = cursor.fetchone()
                     if result:
                         return bool(result[0])
-                    
-                    # Check uppercase
-                    cursor.execute('''
-                        SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
-                    ''', (sym, tag.upper()))
-                    result = cursor.fetchone()
-                    if result:
-                        return bool(result[0])
-                    
-                    # Check if it's a Call/Put variant (mixed case)
-                    if tag.startswith("Call") or tag.startswith("Put"):
-                        cursor.execute('''
-                            SELECT enabled FROM alert_toggles WHERE symbol = ? AND tag = ?
-                        ''', (sym, tag))
-                        result = cursor.fetchone()
-                        if result:
-                            return bool(result[0])
                     
                     # Default to True if not found
                     return True
