@@ -19,6 +19,7 @@ from state_manager import state_manager
 from confluence_rules import confluence_rules
 from webhook_manager import webhook_manager
 from alert_toggle_manager import alert_toggle_manager
+from alternative_channel import send_to_alternative_channel, set_alternative_webhook, get_alternative_webhook
 
 # NEW: imports for scheduler/timezone
 import asyncio
@@ -667,6 +668,13 @@ async def receive_sms(request: Request):
             else:
                 # Log skipped alerts that don't match known categories
                 logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")
+        
+        # Send to alternative channel (independent of main channel, uses different rules)
+        # This runs regardless of main channel filtering - it has its own rules
+        try:
+            await send_to_alternative_channel(parsed_data, log_data)
+        except Exception as e:
+            logger.error(f"Error sending to alternative channel (non-fatal): {e}")
         
         return {"status": "success", "message": "SMS processed successfully"}
         
@@ -2170,6 +2178,48 @@ async def receive_price_alert(alert: PriceAlertMessage):
         
     except Exception as e:
         logger.error(f"Error processing price alert: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/config/alternative-channel-webhook", tags=["Config"])
+async def get_alternative_channel_webhook():
+    """Get current alternative channel webhook URL configuration"""
+    webhook_url = get_alternative_webhook()
+    
+    if webhook_url:
+        masked_url = f"{webhook_url[:50]}..." if len(webhook_url) > 50 else webhook_url
+        return {
+            "configured": True,
+            "webhook_preview": masked_url
+        }
+    return {
+        "configured": False,
+        "message": "Alternative channel webhook not configured"
+    }
+
+@app.post("/config/alternative-channel-webhook", tags=["Config"])
+async def set_alternative_channel_webhook(request: PriceAlertWebhookRequest):
+    """
+    Set or update the alternative channel webhook URL.
+    
+    The alternative channel uses different signal rules and formatting than the main channel.
+    Configure this webhook to enable the alternative channel with custom rules.
+    The alternative channel operates independently and does not affect existing production channels.
+    """
+    try:
+        webhook_url = request.webhook_url.strip()
+        
+        if not webhook_url:
+            raise HTTPException(status_code=400, detail="webhook_url is required")
+        
+        set_alternative_webhook(webhook_url)
+        
+        return {
+            "status": "success",
+            "message": "Alternative channel webhook URL updated"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to update alternative channel webhook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/config/price-alert-webhook", tags=["Config"])
