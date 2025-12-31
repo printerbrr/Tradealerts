@@ -2287,13 +2287,11 @@ def format_vwap_alert_discord(parsed_data: Dict[str, Any]) -> str:
     Format parsed VWAP alert data into Discord message format.
     
     Format: 
-    "{TICKER} Crossed VWAP Upper Band at ${PRICE}
-    {TIME}"
+    "{TICKER} 🔻 VWAP Upper Band Cross @ {PRICE}"
     
     or
     
-    "{TICKER} Crossed VWAP Lower Band at ${PRICE}
-    {TIME}"
+    "{TICKER} 🔺 VWAP Lower Band Cross @ {PRICE}"
     
     Args:
         parsed_data: Dictionary with parsed VWAP alert data
@@ -2305,29 +2303,20 @@ def format_vwap_alert_discord(parsed_data: Dict[str, Any]) -> str:
     price = parsed_data.get("price", "N/A")
     band_type = parsed_data.get("band_type", "N/A")
     
-    # Format price - if it's a number, add $ prefix
+    # Format price - if it's a number, format without $ prefix
     if isinstance(price, (int, float)):
-        price_str = f"${price:.2f}"
+        price_str = f"{price:.2f}"
     else:
         price_str = str(price)
     
-    # Format time - use current time in PST/PDT (consistent with other alerts)
-    import pytz
-    from datetime import timedelta
-    pacific = pytz.timezone('America/Los_Angeles')
-    current_time_pacific = datetime.now(pacific)
-    dst_offset = current_time_pacific.dst()
-    tz_abbrev = "PDT" if dst_offset and dst_offset != timedelta(0) else "PST"
-    display_time = current_time_pacific.strftime("%I:%M %p") + f" {tz_abbrev}"
-    
     # Build the message based on band type
     if band_type == "UPPER":
-        formatted_message = f"{symbol} Crossed VWAP Upper Band at {price_str}\n{display_time}"
+        formatted_message = f"{symbol} 🔻 VWAP Upper Band Cross @ {price_str}"
     elif band_type == "LOWER":
-        formatted_message = f"{symbol} Crossed VWAP Lower Band at {price_str}\n{display_time}"
+        formatted_message = f"{symbol} 🔺 VWAP Lower Band Cross @ {price_str}"
     else:
         # Fallback if band type is unknown
-        formatted_message = f"{symbol} Crossed VWAP Band at {price_str}\n{display_time}"
+        formatted_message = f"{symbol} VWAP Band Cross @ {price_str}"
     
     logger.info(f"Formatted VWAP alert message: {formatted_message[:100]}...")
     return formatted_message
