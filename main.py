@@ -678,9 +678,7 @@ async def receive_sms(request: Request):
             parsed_data = parse_vwap_alert(message)
             
             # Check time/weekend filters (same as regular alerts)
-            import pytz
-            from datetime import datetime
-            
+            # datetime and pytz are already imported at the top of the file
             pacific = pytz.timezone('America/Los_Angeles')
             current_time_pacific = datetime.now(pacific)
             
