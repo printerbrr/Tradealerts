@@ -143,6 +143,32 @@ if PRICE_ALERT_WEBHOOK_URL:
 else:
     logger.warning("PRICE_ALERT_WEBHOOK_URL not found - price alerts will be disabled until configured")
 
+# Load VWAP alert webhook from environment variable first, then from webhook manager, then from config file
+VWAP_ALERT_WEBHOOK_URL = os.environ.get("VWAP_WEBHOOK_URL")
+
+# If not in environment, try to load from webhook manager
+if not VWAP_ALERT_WEBHOOK_URL:
+    VWAP_ALERT_WEBHOOK_URL = webhook_manager.get_vwap_alert_webhook()
+
+# If still not found, try loading from config file (persistent across redeploys)
+if not VWAP_ALERT_WEBHOOK_URL:
+    try:
+        vwap_alert_config_file = "vwap_alert_webhook.txt"
+        if os.path.exists(vwap_alert_config_file):
+            with open(vwap_alert_config_file, "r") as f:
+                VWAP_ALERT_WEBHOOK_URL = f.read().strip()
+                if VWAP_ALERT_WEBHOOK_URL:
+                    logger.info(f"VWAP alert webhook URL loaded from config file: {VWAP_ALERT_WEBHOOK_URL[:50]}...")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to load VWAP alert webhook from config file: {e}")
+
+if VWAP_ALERT_WEBHOOK_URL:
+    logger.info(f"VWAP alert webhook URL loaded: {VWAP_ALERT_WEBHOOK_URL[:50]}...")
+else:
+    logger.warning("VWAP_WEBHOOK_URL not found - VWAP alerts will be disabled until configured")
+
 # Dev Mode Webhook Configuration
 DEV_MODE_WEBHOOK_URL = os.environ.get("DEV_MODE_WEBHOOK_URL")
 
@@ -164,6 +190,14 @@ if DEV_MODE_WEBHOOK_URL:
     logger.info(f"Dev mode webhook URL loaded: {DEV_MODE_WEBHOOK_URL[:50]}...")
 else:
     logger.info("DEV_MODE_WEBHOOK_URL not configured - dev mode will use production webhooks if enabled")
+
+# Configure webhook_manager with dev mode settings
+# This enables centralized dev mode routing for all webhook getters
+def check_dev_mode():
+    """Callback function to check if dev mode is enabled"""
+    return alert_config.parameters.get('dev_mode', False)
+
+webhook_manager.set_dev_mode_config(DEV_MODE_WEBHOOK_URL, check_dev_mode)
 
 # Discord Bot Configuration (for slash commands)
 DISCORD_BOT_PUBLIC_KEY = os.environ.get("DISCORD_BOT_PUBLIC_KEY")
@@ -631,6 +665,45 @@ async def receive_sms(request: Request):
             
             # Return immediately to prevent Tasker timeout
             return {"status": "success", "message": "Price alert received and processing"}
+        
+        # Check if this is a VWAP band crossing alert (applies time/weekend filters)
+        is_vwap_alert = (
+            "vwap" in message_lower and 
+            ("upperband" in message_lower or "lowerband" in message_lower)
+        )
+        
+        if is_vwap_alert:
+            # Route to VWAP alert handler (with time/weekend filters)
+            logger.info("Detected VWAP band crossing alert in SMS - routing to VWAP alert handler")
+            parsed_data = parse_vwap_alert(message)
+            
+            # Check time/weekend filters (same as regular alerts)
+            import pytz
+            from datetime import datetime
+            
+            pacific = pytz.timezone('America/Los_Angeles')
+            current_time_pacific = datetime.now(pacific)
+            
+            # Check for weekend (Saturday=5, Sunday=6) - market is closed
+            if not alert_config.parameters.get('ignore_weekend_filter', False):
+                weekday = current_time_pacific.weekday()
+                if weekday >= 5:  # Saturday (5) or Sunday (6)
+                    logger.info(f"VWAP ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
+                    return {"status": "success", "message": "VWAP alert received but filtered (weekend)"}
+            
+            # Check time filter (5 AM - 1 PM PST/PDT)
+            if not alert_config.parameters.get('ignore_time_filter', False):
+                current_hour = current_time_pacific.hour
+                # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
+                if 13 <= current_hour or current_hour < 5:
+                    logger.info(f"VWAP ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+                    return {"status": "success", "message": "VWAP alert received but filtered (outside hours)"}
+            
+            # Filters passed - send to Discord using VWAP alert webhook (in background to avoid blocking)
+            asyncio.create_task(send_vwap_alert_to_discord(parsed_data))
+            
+            # Return immediately to prevent Tasker timeout
+            return {"status": "success", "message": "VWAP alert received and processing"}
         
         # Parse the SMS data for regular alerts
         parsed_data = parse_sms_data(message)
@@ -1134,17 +1207,8 @@ async def send_discord_alert(log_data: Dict[str, Any]):
         parsed = log_data['parsed_data']
         symbol = parsed.get('symbol', 'SPY').upper()
         
-        # Check if dev mode is enabled - if so, use dev webhook
-        if alert_config.parameters.get('dev_mode', False):
-            webhook_url = DEV_MODE_WEBHOOK_URL
-            if not webhook_url:
-                logger.warning("Dev mode enabled but DEV_MODE_WEBHOOK_URL not configured - falling back to production webhook")
-                webhook_url = webhook_manager.get_webhook(symbol)
-            else:
-                logger.info(f"DEV MODE: Using dev webhook for {symbol}")
-        else:
-            # Get webhook URL for this symbol (production mode)
-            webhook_url = webhook_manager.get_webhook(symbol)
+        # Get webhook URL for this symbol (automatically handles dev mode via webhook_manager)
+        webhook_url = webhook_manager.get_webhook(symbol)
         
         if not webhook_url:
             logger.warning(f"No Discord webhook configured for {symbol}")
@@ -1462,12 +1526,10 @@ async def send_daily_ema_summaries():
                 return
     
     # Check if dev mode is enabled - if so, use dev webhook for all summaries
-    if alert_config.parameters.get('dev_mode', False):
-        webhook_url = DEV_MODE_WEBHOOK_URL
-        if not webhook_url:
-            logger.warning("Dev mode enabled but DEV_MODE_WEBHOOK_URL not configured - falling back to production webhooks")
-            webhook_url = None  # Will use production webhooks per symbol below
-        else:
+    if webhook_manager.is_dev_mode_enabled():
+        # Get dev webhook (will be same for all symbols in dev mode)
+        webhook_url = webhook_manager.get_webhook(symbols[0] if symbols else "SPY")
+        if webhook_url:
             logger.info(f"DEV MODE: Using dev webhook for EMA summaries")
             # Send combined summary to dev webhook
             summary_lines = []
@@ -1484,7 +1546,7 @@ async def send_daily_ema_summaries():
                     logger.warning(f"Failed to send daily EMA summary to dev webhook")
             return
     
-    # Production mode - send to each symbol's webhook
+    # Production mode - send to each symbol's webhook (automatically handles dev mode via webhook_manager)
     for sym in symbols:
         url = webhook_manager.get_webhook(sym)
         if not url:
@@ -2116,8 +2178,9 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
         True if sent successfully, False otherwise
     """
     try:
-        # Check both global variable and webhook manager (in case it was updated)
-        webhook_url = PRICE_ALERT_WEBHOOK_URL or webhook_manager.get_price_alert_webhook()
+        # Get webhook from webhook_manager first (handles dev mode automatically)
+        # Fall back to global variable if webhook_manager doesn't have it
+        webhook_url = webhook_manager.get_price_alert_webhook() or PRICE_ALERT_WEBHOOK_URL
         
         if not webhook_url:
             logger.warning("Price alert webhook URL not configured - cannot send price alert")
@@ -2161,6 +2224,174 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
             
     except Exception as e:
         logger.error(f"Error sending price alert to Discord: {str(e)}")
+        return False
+
+def parse_vwap_alert(message: str) -> Dict[str, Any]:
+    """
+    Parse incoming Schwab VWAP band crossing alert message.
+    
+    Expected formats:
+    - "Schwab:\n ALERT ON SPY WHEN \"reference VWAP().\"LowerBand\" crosses low;5m\" IS TRUE SUBMIT AT 12/30/25 22:05:11 is triggered MARK = 685.66; STUDY = 1.00. VWAP LOWER BAND INTERSECT"
+    - "Schwab:\n ALERT ON SPY WHEN \"reference VWAP().\"UpperBand\" crosses high() within 1 bars;5m\" IS FALSE SUBMIT AT 12/30/25 22:17:55 is triggered MARK = 685.69; STUDY = .00. VWAP UPPER BAND INTERSECT"
+    
+    Args:
+        message: Raw VWAP alert message text
+        
+    Returns:
+        Dictionary with parsed VWAP alert data:
+        - symbol: Stock symbol (e.g., "SPY", "QQQ")
+        - price: Current mark price (e.g., 685.66)
+        - band_type: "UPPER" or "LOWER"
+        - trigger_time: Alert trigger time from message or current time
+    """
+    parsed = {
+        "raw_message": message,
+        "symbol": None,
+        "price": None,
+        "band_type": None,
+        "trigger_time": None,
+    }
+    
+    message_lower = message.lower()
+    
+    # Extract symbol (usually after "ALERT ON")
+    symbol_match = re.search(r'ALERT ON (\w+)', message, re.IGNORECASE)
+    if symbol_match:
+        parsed["symbol"] = symbol_match.group(1).upper()
+    
+    # Extract price (MARK = value) - handle trailing periods or punctuation
+    price_match = re.search(r'MARK\s*=\s*(\d+(?:\.\d+)?)', message, re.IGNORECASE)
+    if price_match:
+        price_value = price_match.group(1)
+        # Strip any trailing periods that might have been captured
+        price_value = price_value.rstrip('.')
+        parsed["price"] = float(price_value)
+    
+    # Extract band type: "UpperBand" or "LowerBand"
+    if "upperband" in message_lower or "upper band" in message_lower:
+        parsed["band_type"] = "UPPER"
+    elif "lowerband" in message_lower or "lower band" in message_lower:
+        parsed["band_type"] = "LOWER"
+    
+    # Extract trigger time from "SUBMIT AT {date time}" pattern
+    time_match = re.search(r'SUBMIT AT (\d+/\d+/\d+ \d+:\d+:\d+)', message, re.IGNORECASE)
+    if time_match:
+        parsed["trigger_time"] = time_match.group(1)
+    else:
+        # If no trigger time in message, use current time
+        parsed["trigger_time"] = datetime.now().strftime("%m/%d/%y %H:%M:%S")
+    
+    logger.info(f"Parsed VWAP alert: {parsed}")
+    return parsed
+
+def format_vwap_alert_discord(parsed_data: Dict[str, Any]) -> str:
+    """
+    Format parsed VWAP alert data into Discord message format.
+    
+    Format: 
+    "{TICKER} Crossed VWAP Upper Band at ${PRICE}
+    {TIME}"
+    
+    or
+    
+    "{TICKER} Crossed VWAP Lower Band at ${PRICE}
+    {TIME}"
+    
+    Args:
+        parsed_data: Dictionary with parsed VWAP alert data
+        
+    Returns:
+        Formatted Discord message string
+    """
+    symbol = parsed_data.get("symbol", "N/A")
+    price = parsed_data.get("price", "N/A")
+    band_type = parsed_data.get("band_type", "N/A")
+    
+    # Format price - if it's a number, add $ prefix
+    if isinstance(price, (int, float)):
+        price_str = f"${price:.2f}"
+    else:
+        price_str = str(price)
+    
+    # Format time - use current time in PST/PDT (consistent with other alerts)
+    import pytz
+    from datetime import timedelta
+    pacific = pytz.timezone('America/Los_Angeles')
+    current_time_pacific = datetime.now(pacific)
+    dst_offset = current_time_pacific.dst()
+    tz_abbrev = "PDT" if dst_offset and dst_offset != timedelta(0) else "PST"
+    display_time = current_time_pacific.strftime("%I:%M %p") + f" {tz_abbrev}"
+    
+    # Build the message based on band type
+    if band_type == "UPPER":
+        formatted_message = f"{symbol} Crossed VWAP Upper Band at {price_str}\n{display_time}"
+    elif band_type == "LOWER":
+        formatted_message = f"{symbol} Crossed VWAP Lower Band at {price_str}\n{display_time}"
+    else:
+        # Fallback if band type is unknown
+        formatted_message = f"{symbol} Crossed VWAP Band at {price_str}\n{display_time}"
+    
+    logger.info(f"Formatted VWAP alert message: {formatted_message[:100]}...")
+    return formatted_message
+
+async def send_vwap_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
+    """
+    Send VWAP alert to Discord using the separate VWAP alert webhook.
+    Uses async httpx to avoid blocking the event loop.
+    
+    Args:
+        parsed_data: Dictionary with parsed VWAP alert data
+        
+    Returns:
+        True if sent successfully, False otherwise
+    """
+    try:
+        # Get webhook from webhook_manager first (handles dev mode automatically)
+        # Fall back to global variable if webhook_manager doesn't have it
+        webhook_url = webhook_manager.get_vwap_alert_webhook() or VWAP_ALERT_WEBHOOK_URL
+        
+        if not webhook_url:
+            logger.warning("VWAP alert webhook URL not configured - cannot send VWAP alert")
+            return False
+        
+        # Format the alert message
+        formatted_message = format_vwap_alert_discord(parsed_data)
+        
+        # Send to Discord using async httpx with timeout
+        payload = {
+            "content": formatted_message
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"VWAP alert sent to Discord successfully")
+                    return True
+                else:
+                    error_msg = f"Failed to send VWAP alert: {response.status_code}"
+                    try:
+                        response_text = response.text
+                        if response_text:
+                            error_msg += f" - Response: {response_text[:200]}"
+                    except:
+                        pass
+                    logger.error(error_msg)
+                    return False
+            except httpx.TimeoutException:
+                logger.error(f"VWAP alert webhook timeout after 10 seconds")
+                return False
+            except httpx.RequestError as e:
+                logger.error(f"VWAP alert webhook request error: {e}")
+                return False
+            
+    except Exception as e:
+        logger.error(f"Error sending VWAP alert to Discord: {str(e)}")
         return False
 
 @app.post("/webhook/price-alert", tags=["Ingest"])
@@ -2306,6 +2537,63 @@ async def set_price_alert_webhook(request: PriceAlertWebhookRequest):
         
     except Exception as e:
         logger.error(f"Failed to update price alert webhook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/config/vwap-alert-webhook", tags=["Config"])
+async def get_vwap_alert_webhook():
+    """Get current VWAP alert webhook URL configuration"""
+    # Check both global variable and webhook manager (in case it was updated)
+    webhook_url = VWAP_ALERT_WEBHOOK_URL or webhook_manager.get_vwap_alert_webhook()
+    
+    if webhook_url:
+        masked_url = f"{webhook_url[:50]}..." if len(webhook_url) > 50 else webhook_url
+        return {
+            "configured": True,
+            "webhook_preview": masked_url
+        }
+    return {
+        "configured": False,
+        "message": "VWAP alert webhook not configured"
+    }
+
+@app.post("/config/vwap-alert-webhook", tags=["Config"])
+async def set_vwap_alert_webhook(request: PriceAlertWebhookRequest):
+    """
+    Set or update the VWAP alert webhook URL.
+    
+    This webhook is separate from the regular alert webhooks and is used
+    specifically for VWAP band crossing alerts. Stored in discord_webhooks.json alongside other webhooks.
+    """
+    global VWAP_ALERT_WEBHOOK_URL
+    
+    try:
+        webhook_url = request.webhook_url.strip()
+        
+        if not webhook_url:
+            raise HTTPException(status_code=400, detail="webhook_url is required")
+        
+        # Save to webhook manager (discord_webhooks.json)
+        webhook_manager.set_vwap_alert_webhook(webhook_url)
+        
+        # Also save to persistent config file for reliability across redeploys
+        try:
+            vwap_alert_config_file = "vwap_alert_webhook.txt"
+            with open(vwap_alert_config_file, "w") as f:
+                f.write(webhook_url)
+            logger.info(f"VWAP alert webhook URL saved to config file: {vwap_alert_config_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save VWAP alert webhook to config file: {e}")
+        
+        VWAP_ALERT_WEBHOOK_URL = webhook_url
+        logger.info(f"VWAP alert webhook URL updated: {webhook_url[:50]}...")
+        
+        return {
+            "status": "success",
+            "message": "VWAP alert webhook URL updated"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to update VWAP alert webhook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

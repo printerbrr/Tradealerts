@@ -243,6 +243,12 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
             logger.debug("ALTERNATIVE CHANNEL: Message formatting returned None")
             return False
         
+        # Get webhook URL (handles dev mode automatically)
+        webhook_url = get_alternative_webhook()
+        if not webhook_url:
+            logger.debug("ALTERNATIVE CHANNEL: Webhook not configured")
+            return False
+        
         # Send to Discord using async httpx with timeout
         payload = {
             "content": message
@@ -251,7 +257,7 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 response = await client.post(
-                    ALTERNATIVE_CHANNEL_WEBHOOK_URL,
+                    webhook_url,
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
@@ -300,6 +306,16 @@ def set_alternative_webhook(webhook_url: str):
     logger.info(f"Alternative channel webhook updated: {ALTERNATIVE_CHANNEL_WEBHOOK_URL[:50]}...")
 
 def get_alternative_webhook() -> Optional[str]:
-    """Get current alternative channel webhook URL"""
+    """Get current alternative channel webhook URL - returns dev webhook if dev mode is enabled"""
+    # Check dev mode via webhook_manager to avoid circular dependency
+    try:
+        from webhook_manager import webhook_manager
+        if webhook_manager.is_dev_mode_enabled() and webhook_manager.dev_webhook_url:
+            logger.debug("DEV MODE: Using dev webhook for alternative channel")
+            return webhook_manager.dev_webhook_url
+    except (ImportError, AttributeError):
+        # If import fails (e.g., during initialization), just return normal webhook
+        pass
+    
     return ALTERNATIVE_CHANNEL_WEBHOOK_URL
 

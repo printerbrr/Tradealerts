@@ -17,7 +17,38 @@ class WebhookManager:
     def __init__(self, config_file: str = "discord_webhooks.json"):
         self.config_file = config_file
         self.webhooks = {}
+        self.dev_webhook_url = None
+        self.dev_mode_checker = None  # Callback function to check if dev mode is enabled
         self.load_webhooks()
+    
+    def set_dev_mode_config(self, dev_webhook_url: Optional[str], dev_mode_checker):
+        """
+        Configure dev mode settings
+        
+        Args:
+            dev_webhook_url: The dev webhook URL to use when dev mode is enabled
+            dev_mode_checker: Callback function that returns True if dev mode is enabled
+        """
+        self.dev_webhook_url = dev_webhook_url
+        self.dev_mode_checker = dev_mode_checker
+        if dev_webhook_url:
+            logger.info(f"Dev mode webhook configured: {dev_webhook_url[:50]}...")
+    
+    def is_dev_mode_enabled(self) -> bool:
+        """Check if dev mode is currently enabled"""
+        if not self.dev_mode_checker:
+            return False
+        try:
+            return self.dev_mode_checker()
+        except Exception as e:
+            logger.warning(f"Error checking dev mode: {e}")
+            return False
+    
+    def _get_dev_webhook_if_enabled(self) -> Optional[str]:
+        """Get dev webhook URL if dev mode is enabled, otherwise None"""
+        if self.is_dev_mode_enabled() and self.dev_webhook_url:
+            return self.dev_webhook_url
+        return None
     
     def load_webhooks(self):
         """Load webhook URLs from JSON config file"""
@@ -103,8 +134,14 @@ class WebhookManager:
     def get_webhook(self, symbol: str) -> Optional[str]:
         """
         Get webhook URL for a specific symbol
-        Returns symbol-specific webhook, or default, or None
+        Returns dev webhook if dev mode is enabled, otherwise symbol-specific webhook, or default, or None
         """
+        # Check dev mode first - if enabled, return dev webhook
+        dev_webhook = self._get_dev_webhook_if_enabled()
+        if dev_webhook:
+            logger.debug(f"DEV MODE: Using dev webhook for {symbol}")
+            return dev_webhook
+        
         symbol = symbol.upper()
         
         # Try symbol-specific webhook first
@@ -149,8 +186,8 @@ class WebhookManager:
             logger.error(f"Failed to save webhook configuration: {e}")
     
     def get_all_symbols(self) -> list:
-        """Get list of all configured symbols (excluding default and PRICE_ALERT)"""
-        return [s for s in self.webhooks.keys() if s not in ["default", "PRICE_ALERT", "price_alert"]]
+        """Get list of all configured symbols (excluding default, PRICE_ALERT, and VWAP_ALERT)"""
+        return [s for s in self.webhooks.keys() if s not in ["default", "PRICE_ALERT", "price_alert", "VWAP_ALERT", "vwap_alert"]]
     
     def get_config(self) -> Dict[str, str]:
         """Get full webhook configuration"""
@@ -168,7 +205,13 @@ class WebhookManager:
         return old_url is not None  # Returns True if updating, False if adding new
     
     def get_price_alert_webhook(self) -> Optional[str]:
-        """Get price alert webhook URL"""
+        """Get price alert webhook URL - returns dev webhook if dev mode is enabled"""
+        # Check dev mode first - if enabled, return dev webhook
+        dev_webhook = self._get_dev_webhook_if_enabled()
+        if dev_webhook:
+            logger.debug("DEV MODE: Using dev webhook for price alerts")
+            return dev_webhook
+        
         return self.webhooks.get("PRICE_ALERT") or self.webhooks.get("price_alert")
     
     def set_price_alert_webhook(self, webhook_url: str):
@@ -176,6 +219,22 @@ class WebhookManager:
         self.webhooks["PRICE_ALERT"] = webhook_url
         self.save_webhooks()
         logger.info("Updated price alert webhook")
+    
+    def get_vwap_alert_webhook(self) -> Optional[str]:
+        """Get VWAP alert webhook URL - returns dev webhook if dev mode is enabled"""
+        # Check dev mode first - if enabled, return dev webhook
+        dev_webhook = self._get_dev_webhook_if_enabled()
+        if dev_webhook:
+            logger.debug("DEV MODE: Using dev webhook for VWAP alerts")
+            return dev_webhook
+        
+        return self.webhooks.get("VWAP_ALERT") or self.webhooks.get("vwap_alert")
+    
+    def set_vwap_alert_webhook(self, webhook_url: str):
+        """Set or update VWAP alert webhook URL"""
+        self.webhooks["VWAP_ALERT"] = webhook_url
+        self.save_webhooks()
+        logger.info("Updated VWAP alert webhook")
 
 # Global webhook manager instance
 webhook_manager = WebhookManager()
