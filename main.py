@@ -25,11 +25,23 @@ from alternative_channel import send_to_alternative_channel, set_alternative_web
 import asyncio
 import pytz
 import httpx
+import traceback
+import sys
+import time
+from functools import wraps
+
+# ============================================================================
+# DEBUG LOGGING FLAG - Set to False to disable all debug logging
+# ============================================================================
+DEBUG_LOGGING = True  # TODO: Set to False once bug is fixed
 
 # Configure logging
+log_level = logging.DEBUG if DEBUG_LOGGING else logging.INFO
+log_format = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s' if DEBUG_LOGGING else '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
 logging.basicConfig(
-    level=logging.INFO,  # Production logging level
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=log_level,
+    format=log_format,
     handlers=[
         logging.FileHandler('trade_alerts.log'),  # Production log file
         logging.StreamHandler()
@@ -37,11 +49,69 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Log uncaught exceptions if debug logging enabled
+if DEBUG_LOGGING:
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    sys.excepthook = handle_exception
+
 app = FastAPI(
     title="Trade Alerts SMS Parser",
     description="A lean SMS-based trade alerting system with enhanced state management",
     version="2.0.0"
 )
+
+# ============================================================================
+# DEBUG LOGGING: Request Middleware
+# ============================================================================
+if DEBUG_LOGGING:
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        start_time = time.time()
+        request_id = f"{int(time.time() * 1000)}"
+        
+        logger.info(f"[{request_id}] REQUEST START: {request.method} {request.url.path}")
+        if DEBUG_LOGGING:
+            logger.debug(f"[{request_id}] Headers: {dict(request.headers)}")
+            logger.debug(f"[{request_id}] Client: {request.client.host if request.client else 'unknown'}")
+        
+        try:
+            response = await call_next(request)
+            process_time = time.time() - start_time
+            logger.info(f"[{request_id}] REQUEST END: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.3f}s")
+            return response
+        except Exception as e:
+            process_time = time.time() - start_time
+            logger.error(f"[{request_id}] REQUEST ERROR: {request.method} {request.url.path} - Exception: {e} - Time: {process_time:.3f}s")
+            logger.error(f"[{request_id}] Exception traceback: {traceback.format_exc()}")
+            raise
+
+# ============================================================================
+# DEBUG LOGGING: Database Status Checker
+# ============================================================================
+if DEBUG_LOGGING:
+    def log_database_status():
+        """Log database connection status"""
+        try:
+            import sqlite3
+            conn = sqlite3.connect(state_manager.database_path, timeout=1)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA database_list")
+            dbs = cursor.fetchall()
+            cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            table_count = cursor.fetchone()[0]
+            conn.close()
+            logger.info(f"DB STATUS: Connected, {table_count} tables, path: {state_manager.database_path}")
+            return True
+        except sqlite3.OperationalError as e:
+            logger.error(f"DB STATUS: Operational error - {e}")
+            return False
+        except Exception as e:
+            logger.error(f"DB STATUS: Unexpected error - {e}")
+            return False
 
 # Data models
 class SMSMessage(BaseModel):
@@ -224,11 +294,14 @@ except Exception as e:
 
 @app.get("/", tags=["Root"])
 async def root():
+    if DEBUG_LOGGING:
+        logger.info("Health check endpoint called")
     return {
         "message": "Trade Alerts SMS Parser", 
         "status": "healthy",
         "version": "2.0.0",
-        "mode": "production"
+        "mode": "production",
+        "debug_logging": DEBUG_LOGGING  # Include debug status in response
     }
 
 # Discord Bot Interaction Handlers
@@ -448,10 +521,30 @@ async def receive_sms(request: Request):
     """
     Webhook endpoint to receive SMS messages forwarded from Tasker
     """
+    # ============================================================================
+    # DEBUG LOGGING: Request tracking
+    # ============================================================================
+    request_start = time.time() if DEBUG_LOGGING else None
+    request_id = f"SMS-{int(time.time() * 1000)}" if DEBUG_LOGGING else None
+    
+    if DEBUG_LOGGING:
+        logger.info(f"[{request_id}] ========== SMS ENDPOINT CALLED ==========")
+        logger.info(f"[{request_id}] Request method: {request.method}")
+        logger.info(f"[{request_id}] Request URL: {request.url}")
+        logger.info(f"[{request_id}] Client IP: {request.client.host if request.client else 'unknown'}")
+    
     try:
-        # Get raw body to handle malformed JSON
+        # ============================================================================
+        # DEBUG LOGGING: Body reading
+        # ============================================================================
+        if DEBUG_LOGGING:
+            logger.info(f"[{request_id}] Step 1: Reading request body...")
         body = await request.body()
-        logger.info(f"Raw request body: {body}")
+        if DEBUG_LOGGING:
+            logger.info(f"[{request_id}] Step 1 Complete: Body length: {len(body)} bytes")
+            logger.debug(f"[{request_id}] Raw request body (first 500 chars): {body[:500]}")
+        else:
+            logger.info(f"Raw request body: {body}")
         
         # Decode body string first
         body_str = body.decode('utf-8', errors='ignore')
@@ -659,13 +752,35 @@ async def receive_sms(request: Request):
         # Update system state based on detected crossovers
         update_system_state(parsed_data)
         
+        # ============================================================================
+        # DEBUG LOGGING: Analysis and background tasks
+        # ============================================================================
         # Analyze the data and check for alerts
         # Run in background to avoid blocking response
+        if DEBUG_LOGGING:
+            logger.info(f"[{request_id}] Step 5: Analyzing data and creating background tasks...")
+        
         if alert_config.enabled:
+            if DEBUG_LOGGING:
+                analyze_start = time.time()
+            
             alert_triggered = analyze_data(parsed_data)
+            
+            if DEBUG_LOGGING:
+                analyze_time = time.time() - analyze_start
+                logger.info(f"[{request_id}] Analysis complete in {analyze_time:.3f}s - Alert triggered: {alert_triggered}")
+            
             if alert_triggered:
-                # Send in background task to avoid blocking
-                asyncio.create_task(send_discord_alert(log_data))
+                if DEBUG_LOGGING:
+                    logger.info(f"[{request_id}] Creating background task for Discord alert...")
+                try:
+                    task = asyncio.create_task(send_discord_alert(log_data))
+                    if DEBUG_LOGGING:
+                        logger.info(f"[{request_id}] Background task created: {task}")
+                except Exception as task_error:
+                    if DEBUG_LOGGING:
+                        logger.error(f"[{request_id}] Failed to create Discord alert task: {task_error}")
+                        logger.error(f"[{request_id}] Task creation traceback: {traceback.format_exc()}")
             else:
                 # Log skipped alerts that don't match known categories
                 logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")
@@ -673,14 +788,35 @@ async def receive_sms(request: Request):
         # Send to alternative channel (independent of main channel, uses different rules)
         # This runs regardless of main channel filtering - it has its own rules
         # Run in background to avoid blocking response
-        asyncio.create_task(send_to_alternative_channel(parsed_data, log_data))
+        if DEBUG_LOGGING:
+            logger.info(f"[{request_id}] Step 6: Creating alternative channel task...")
+        
+        try:
+            alt_task = asyncio.create_task(send_to_alternative_channel(parsed_data, log_data))
+            if DEBUG_LOGGING:
+                logger.info(f"[{request_id}] Alternative channel task created: {alt_task}")
+        except Exception as alt_task_error:
+            if DEBUG_LOGGING:
+                logger.error(f"[{request_id}] Failed to create alternative channel task: {alt_task_error}")
+                logger.error(f"[{request_id}] Alt task traceback: {traceback.format_exc()}")
         
         # Return immediately to prevent Tasker timeout
         # All processing continues in background
+        if DEBUG_LOGGING:
+            total_time = time.time() - request_start
+            logger.info(f"[{request_id}] ========== SMS ENDPOINT RETURNING (Total: {total_time:.3f}s) ==========")
+        
         return {"status": "success", "message": "SMS received and processing"}
         
     except Exception as e:
-        logger.error(f"Error processing SMS: {str(e)}")
+        if DEBUG_LOGGING:
+            total_time = time.time() - request_start if request_start else 0
+            logger.error(f"[{request_id}] ========== SMS ENDPOINT ERROR (Total: {total_time:.3f}s) ==========")
+            logger.error(f"[{request_id}] Exception type: {type(e).__name__}")
+            logger.error(f"[{request_id}] Exception message: {str(e)}")
+            logger.error(f"[{request_id}] Full traceback:\n{traceback.format_exc()}")
+        else:
+            logger.error(f"Error processing SMS: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def parse_sms_data(message: str) -> Dict[str, Any]:
@@ -1125,8 +1261,16 @@ async def send_discord_alert(log_data: Dict[str, Any]):
     Send alert to Discord webhook based on symbol
     Uses async httpx to avoid blocking the event loop
     """
+    # ============================================================================
+    # DEBUG LOGGING: Discord alert tracking
+    # ============================================================================
+    alert_start = time.time() if DEBUG_LOGGING else 0
+    alert_id = f"ALERT-{int(time.time() * 1000)}" if DEBUG_LOGGING else ""
+    
+    if DEBUG_LOGGING:
+        logger.info(f"[{alert_id}] ========== DISCORD ALERT START ==========")
+    
     try:
-        
         parsed = log_data['parsed_data']
         symbol = parsed.get('symbol', 'SPY').upper()
         
@@ -1341,7 +1485,11 @@ TIME: {display_time}
                 )
                 
                 if response.status_code == 204:
-                    logger.info(f"Discord alert sent to {symbol} webhook successfully")
+                    if DEBUG_LOGGING:
+                        alert_time = time.time() - alert_start
+                        logger.info(f"[{alert_id}] Discord alert sent to {symbol} webhook successfully in {alert_time:.3f}s")
+                    else:
+                        logger.info(f"Discord alert sent to {symbol} webhook successfully")
                 else:
                     # Log detailed error information
                     error_msg = f"Failed to send Discord alert: {response.status_code}"
@@ -1368,14 +1516,32 @@ TIME: {display_time}
                     
                     logger.error(error_msg)
             except httpx.TimeoutException:
-                logger.error(f"Discord webhook timeout for {symbol} after 10 seconds")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alert_id}] Discord webhook timeout for {symbol} after 10 seconds")
+                else:
+                    logger.error(f"Discord webhook timeout for {symbol} after 10 seconds")
             except httpx.RequestError as e:
-                logger.error(f"Discord webhook request error for {symbol}: {e}")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alert_id}] Discord webhook request error for {symbol}: {e}")
+                    logger.error(f"[{alert_id}] Request error traceback: {traceback.format_exc()}")
+                else:
+                    logger.error(f"Discord webhook request error for {symbol}: {e}")
             except Exception as e:
-                logger.error(f"Unexpected error sending Discord alert for {symbol}: {e}")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alert_id}] Unexpected error sending Discord alert for {symbol}: {e}")
+                    logger.error(f"[{alert_id}] Unexpected error traceback: {traceback.format_exc()}")
+                else:
+                    logger.error(f"Unexpected error sending Discord alert for {symbol}: {e}")
             
     except Exception as e:
-        logger.error(f"Error sending Discord alert: {str(e)}")
+        if DEBUG_LOGGING:
+            alert_time = time.time() - alert_start
+            logger.error(f"[{alert_id}] ========== DISCORD ALERT ERROR (Time: {alert_time:.3f}s) ==========")
+            logger.error(f"[{alert_id}] Error sending Discord alert: {str(e)}")
+            logger.error(f"[{alert_id}] Full traceback: {traceback.format_exc()}")
+        else:
+            logger.error(f"Error sending Discord alert: {str(e)}")
+        
         # Also log the webhook URL (masked) if available
         try:
             webhook_display = webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url

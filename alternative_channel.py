@@ -8,11 +8,18 @@ Uses the same EMA state tracking but applies different filtering/formatting
 import logging
 import httpx
 import pytz
+import traceback
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from state_manager import state_manager
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# DEBUG LOGGING FLAG - Set to False to disable all debug logging
+# ============================================================================
+DEBUG_LOGGING = True  # TODO: Set to False once bug is fixed
 
 # Alternative channel webhook URL (loaded from config)
 ALTERNATIVE_CHANNEL_WEBHOOK_URL = None
@@ -223,6 +230,15 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
     
     Returns True if sent successfully, False otherwise
     """
+    # ============================================================================
+    # DEBUG LOGGING: Alternative channel tracking
+    # ============================================================================
+    alt_start = time.time() if DEBUG_LOGGING else 0
+    alt_id = f"ALT-{int(time.time() * 1000)}" if DEBUG_LOGGING else ""
+    
+    if DEBUG_LOGGING:
+        logger.info(f"[{alt_id}] ========== ALTERNATIVE CHANNEL START ==========")
+    
     try:
         global ALTERNATIVE_CHANNEL_WEBHOOK_URL
         
@@ -256,7 +272,11 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
                 )
                 
                 if response.status_code == 204:
-                    logger.info(f"Alternative channel alert sent successfully")
+                    if DEBUG_LOGGING:
+                        alt_time = time.time() - alt_start
+                        logger.info(f"[{alt_id}] Alternative channel alert sent successfully in {alt_time:.3f}s")
+                    else:
+                        logger.info(f"Alternative channel alert sent successfully")
                     return True
                 else:
                     error_msg = f"Failed to send alternative channel alert: {response.status_code}"
@@ -266,20 +286,40 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
                             error_msg += f" - Response: {response_text[:200]}"
                     except:
                         pass
-                    logger.error(error_msg)
+                    if DEBUG_LOGGING:
+                        logger.error(f"[{alt_id}] {error_msg}")
+                    else:
+                        logger.error(error_msg)
                     return False
             except httpx.TimeoutException:
-                logger.error(f"Alternative channel webhook timeout after 10 seconds")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alt_id}] Alternative channel webhook timeout after 10 seconds")
+                else:
+                    logger.error(f"Alternative channel webhook timeout after 10 seconds")
                 return False
             except httpx.RequestError as e:
-                logger.error(f"Alternative channel webhook request error: {e}")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alt_id}] Alternative channel webhook request error: {e}")
+                    logger.error(f"[{alt_id}] Request error traceback: {traceback.format_exc()}")
+                else:
+                    logger.error(f"Alternative channel webhook request error: {e}")
                 return False
             except Exception as e:
-                logger.error(f"Unexpected error sending to alternative channel: {e}")
+                if DEBUG_LOGGING:
+                    logger.error(f"[{alt_id}] Unexpected error sending to alternative channel: {e}")
+                    logger.error(f"[{alt_id}] Unexpected error traceback: {traceback.format_exc()}")
+                else:
+                    logger.error(f"Unexpected error sending to alternative channel: {e}")
                 return False
             
     except Exception as e:
-        logger.error(f"Error sending to alternative channel: {str(e)}")
+        if DEBUG_LOGGING:
+            alt_time = time.time() - alt_start
+            logger.error(f"[{alt_id}] ========== ALTERNATIVE CHANNEL ERROR (Time: {alt_time:.3f}s) ==========")
+            logger.error(f"[{alt_id}] Error sending to alternative channel: {str(e)}")
+            logger.error(f"[{alt_id}] Full traceback: {traceback.format_exc()}")
+        else:
+            logger.error(f"Error sending to alternative channel: {str(e)}")
         return False
 
 def set_alternative_webhook(webhook_url: str):
