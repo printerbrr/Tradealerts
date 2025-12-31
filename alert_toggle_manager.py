@@ -162,8 +162,12 @@ class AlertToggleManager:
                     
                     conn.commit()
                     
-                    # Return all toggles for this symbol
-                    return self.get(sym)
+                    # Return all toggles for this symbol (query directly, don't call self.get() to avoid deadlock)
+                    cursor.execute('''
+                        SELECT tag, enabled FROM alert_toggles WHERE symbol = ?
+                    ''', (sym,))
+                    results = cursor.fetchall()
+                    return {tag: bool(enabled) for tag, enabled in results}
             except Exception as e:
                 logger.error(f"Failed to set toggles for {sym}: {e}")
                 return {}
