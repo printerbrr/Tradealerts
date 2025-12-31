@@ -24,6 +24,7 @@ from alternative_channel import send_to_alternative_channel, set_alternative_web
 # NEW: imports for scheduler/timezone
 import asyncio
 import pytz
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -626,13 +627,11 @@ async def receive_sms(request: Request):
             logger.info("Detected price alert in SMS - routing to price alert handler")
             parsed_data = parse_price_alert(message)
             
-            # Send to Discord using price alert webhook
-            success = await send_price_alert_to_discord(parsed_data)
+            # Send to Discord using price alert webhook (in background to avoid blocking)
+            asyncio.create_task(send_price_alert_to_discord(parsed_data))
             
-            if success:
-                return {"status": "success", "message": "Price alert processed and sent to Discord"}
-            else:
-                return {"status": "error", "message": "Price alert processed but failed to send to Discord"}
+            # Return immediately to prevent Tasker timeout
+            return {"status": "success", "message": "Price alert received and processing"}
         
         # Parse the SMS data for regular alerts
         parsed_data = parse_sms_data(message)
@@ -661,22 +660,24 @@ async def receive_sms(request: Request):
         update_system_state(parsed_data)
         
         # Analyze the data and check for alerts
+        # Run in background to avoid blocking response
         if alert_config.enabled:
             alert_triggered = analyze_data(parsed_data)
             if alert_triggered:
-                await send_discord_alert(log_data)
+                # Send in background task to avoid blocking
+                asyncio.create_task(send_discord_alert(log_data))
             else:
                 # Log skipped alerts that don't match known categories
                 logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")
         
         # Send to alternative channel (independent of main channel, uses different rules)
         # This runs regardless of main channel filtering - it has its own rules
-        try:
-            await send_to_alternative_channel(parsed_data, log_data)
-        except Exception as e:
-            logger.error(f"Error sending to alternative channel (non-fatal): {e}")
+        # Run in background to avoid blocking response
+        asyncio.create_task(send_to_alternative_channel(parsed_data, log_data))
         
-        return {"status": "success", "message": "SMS processed successfully"}
+        # Return immediately to prevent Tasker timeout
+        # All processing continues in background
+        return {"status": "success", "message": "SMS received and processing"}
         
     except Exception as e:
         logger.error(f"Error processing SMS: {str(e)}")
@@ -1122,9 +1123,9 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
 async def send_discord_alert(log_data: Dict[str, Any]):
     """
     Send alert to Discord webhook based on symbol
+    Uses async httpx to avoid blocking the event loop
     """
     try:
-        import requests
         
         parsed = log_data['parsed_data']
         symbol = parsed.get('symbol', 'SPY').upper()
@@ -1330,39 +1331,48 @@ TIME: {display_time}
             "content": message
         }
         
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={"Content-Type": "application/json"}
-        )
-        
-        if response.status_code == 204:
-            logger.info(f"Discord alert sent to {symbol} webhook successfully")
-        else:
-            # Log detailed error information
-            error_msg = f"Failed to send Discord alert: {response.status_code}"
-            
-            # Try to get response body for more details
+        # Use async httpx with timeout to avoid blocking
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                response_text = response.text
-                if response_text:
-                    error_msg += f" - Response: {response_text[:200]}"
-            except:
-                pass
-            
-            # Log webhook URL status (masked for security)
-            webhook_display = webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url
-            error_msg += f" - Webhook: {webhook_display}"
-            
-            # Specific error messages for common status codes
-            if response.status_code == 404:
-                error_msg += " - Webhook URL not found. Possible causes: webhook deleted, invalid URL, or URL malformed."
-            elif response.status_code == 401:
-                error_msg += " - Unauthorized. Webhook URL may be invalid."
-            elif response.status_code == 400:
-                error_msg += " - Bad request. Check payload format."
-            
-            logger.error(error_msg)
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"Discord alert sent to {symbol} webhook successfully")
+                else:
+                    # Log detailed error information
+                    error_msg = f"Failed to send Discord alert: {response.status_code}"
+                    
+                    # Try to get response body for more details
+                    try:
+                        response_text = response.text
+                        if response_text:
+                            error_msg += f" - Response: {response_text[:200]}"
+                    except:
+                        pass
+                    
+                    # Log webhook URL status (masked for security)
+                    webhook_display = webhook_url[:50] + "..." if len(webhook_url) > 50 else webhook_url
+                    error_msg += f" - Webhook: {webhook_display}"
+                    
+                    # Specific error messages for common status codes
+                    if response.status_code == 404:
+                        error_msg += " - Webhook URL not found. Possible causes: webhook deleted, invalid URL, or URL malformed."
+                    elif response.status_code == 401:
+                        error_msg += " - Unauthorized. Webhook URL may be invalid."
+                    elif response.status_code == 400:
+                        error_msg += " - Bad request. Check payload format."
+                    
+                    logger.error(error_msg)
+            except httpx.TimeoutException:
+                logger.error(f"Discord webhook timeout for {symbol} after 10 seconds")
+            except httpx.RequestError as e:
+                logger.error(f"Discord webhook request error for {symbol}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error sending Discord alert for {symbol}: {e}")
             
     except Exception as e:
         logger.error(f"Error sending Discord alert: {str(e)}")
@@ -1373,14 +1383,21 @@ TIME: {display_time}
         except:
             pass
 
-# NEW: helper to post simple messages to a webhook
-def _post_discord_message(webhook_url: str, content: str) -> bool:
+# NEW: helper to post simple messages to a webhook (async)
+async def _post_discord_message(webhook_url: str, content: str) -> bool:
     try:
-        import requests
-        resp = requests.post(webhook_url, json={"content": content}, headers={"Content-Type": "application/json"})
-        if resp.status_code == 204:
-            return True
-        logger.warning(f"Discord post non-204: {resp.status_code}")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                webhook_url, 
+                json={"content": content}, 
+                headers={"Content-Type": "application/json"}
+            )
+            if resp.status_code == 204:
+                return True
+            logger.warning(f"Discord post non-204: {resp.status_code}")
+            return False
+    except httpx.TimeoutException:
+        logger.error(f"Discord webhook timeout after 10 seconds")
         return False
     except Exception as e:
         logger.error(f"Discord post failed: {e}")
@@ -1455,7 +1472,7 @@ async def send_daily_ema_summaries():
             
             if summary_lines:
                 combined_content = "\n\n".join(summary_lines)
-                ok = _post_discord_message(webhook_url, combined_content)
+                ok = await _post_discord_message(webhook_url, combined_content)
                 if ok:
                     logger.info(f"Daily EMA summary sent to dev webhook for {len(symbols)} symbol(s)")
                 else:
@@ -1468,7 +1485,7 @@ async def send_daily_ema_summaries():
         if not url:
             continue
         content = f"{sym} EMA States\n\n" + _build_ema_summary(sym)
-        ok = _post_discord_message(url, content)
+        ok = await _post_discord_message(url, content)
         if ok:
             logger.info(f"Daily EMA summary sent for {sym}")
         else:
@@ -2085,6 +2102,7 @@ MARK: ${mark}
 async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
     """
     Send price alert to Discord using the separate price alert webhook.
+    Uses async httpx to avoid blocking the event loop.
     
     Args:
         parsed_data: Dictionary with parsed price alert data
@@ -2093,8 +2111,6 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
         True if sent successfully, False otherwise
     """
     try:
-        import requests
-        
         # Check both global variable and webhook manager (in case it was updated)
         webhook_url = PRICE_ALERT_WEBHOOK_URL or webhook_manager.get_price_alert_webhook()
         
@@ -2105,30 +2121,38 @@ async def send_price_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
         # Format the alert message
         formatted_message = format_price_alert_discord(parsed_data)
         
-        # Send to Discord
+        # Send to Discord using async httpx with timeout
         payload = {
             "content": formatted_message
         }
         
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={"Content-Type": "application/json"}
-        )
-        
-        if response.status_code == 204:
-            logger.info(f"Price alert sent to Discord successfully")
-            return True
-        else:
-            error_msg = f"Failed to send price alert: {response.status_code}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                response_text = response.text
-                if response_text:
-                    error_msg += f" - Response: {response_text[:200]}"
-            except:
-                pass
-            logger.error(error_msg)
-            return False
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"Price alert sent to Discord successfully")
+                    return True
+                else:
+                    error_msg = f"Failed to send price alert: {response.status_code}"
+                    try:
+                        response_text = response.text
+                        if response_text:
+                            error_msg += f" - Response: {response_text[:200]}"
+                    except:
+                        pass
+                    logger.error(error_msg)
+                    return False
+            except httpx.TimeoutException:
+                logger.error(f"Price alert webhook timeout after 10 seconds")
+                return False
+            except httpx.RequestError as e:
+                logger.error(f"Price alert webhook request error: {e}")
+                return False
             
     except Exception as e:
         logger.error(f"Error sending price alert to Discord: {str(e)}")

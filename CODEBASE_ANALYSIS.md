@@ -518,3 +518,4 @@ POST /alerts/SPY
 - **State Persistence**: All states survive restarts via SQLite database
 - **Multi-Symbol Support**: Each symbol can have its own webhook and toggle settings
 
+

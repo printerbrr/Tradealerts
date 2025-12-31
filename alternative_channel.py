@@ -6,7 +6,7 @@ Uses the same EMA state tracking but applies different filtering/formatting
 """
 
 import logging
-import requests
+import httpx
 import pytz
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
@@ -242,31 +242,41 @@ async def send_to_alternative_channel(parsed_data: Dict[str, Any], log_data: Dic
             logger.debug("ALTERNATIVE CHANNEL: Message formatting returned None")
             return False
         
-        # Send to Discord
+        # Send to Discord using async httpx with timeout
         payload = {
             "content": message
         }
         
-        response = requests.post(
-            ALTERNATIVE_CHANNEL_WEBHOOK_URL,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
-        
-        if response.status_code == 204:
-            logger.info(f"Alternative channel alert sent successfully")
-            return True
-        else:
-            error_msg = f"Failed to send alternative channel alert: {response.status_code}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                response_text = response.text
-                if response_text:
-                    error_msg += f" - Response: {response_text[:200]}"
-            except:
-                pass
-            logger.error(error_msg)
-            return False
+                response = await client.post(
+                    ALTERNATIVE_CHANNEL_WEBHOOK_URL,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"Alternative channel alert sent successfully")
+                    return True
+                else:
+                    error_msg = f"Failed to send alternative channel alert: {response.status_code}"
+                    try:
+                        response_text = response.text
+                        if response_text:
+                            error_msg += f" - Response: {response_text[:200]}"
+                    except:
+                        pass
+                    logger.error(error_msg)
+                    return False
+            except httpx.TimeoutException:
+                logger.error(f"Alternative channel webhook timeout after 10 seconds")
+                return False
+            except httpx.RequestError as e:
+                logger.error(f"Alternative channel webhook request error: {e}")
+                return False
+            except Exception as e:
+                logger.error(f"Unexpected error sending to alternative channel: {e}")
+                return False
             
     except Exception as e:
         logger.error(f"Error sending to alternative channel: {str(e)}")
