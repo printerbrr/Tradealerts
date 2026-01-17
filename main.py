@@ -3,9 +3,9 @@ import re
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import hashlib
 import hmac
@@ -90,13 +90,70 @@ class PriceAlertWebhookRequest(BaseModel):
     """Request model for setting price alert webhook URL"""
     webhook_url: str
 
+class PendingClearRequest(BaseModel):
+    symbol: Optional[str] = None
+    timeframe: Optional[str] = None
+
 # Global configuration (will be loaded from environment/config file)
 alert_config = AlertConfig()
+
+# Pending EMA confirmation tasks (keyed by symbol/timeframe)
+PENDING_EMA_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
+
+EMA_CLOSE_CONFIRM_TIMEFRAMES = {"1MIN", "5MIN", "15MIN"}
+EMA_DELAY_15_MIN_TIMEFRAMES = {"30MIN", "1HR", "2HR", "4HR"}
+
+def _pending_task_key(symbol: str, timeframe: str) -> Tuple[str, str]:
+    return (symbol.upper(), timeframe.upper())
+
+def _parse_trigger_time(value: Optional[str]) -> datetime:
+    if not value:
+        pacific = pytz.timezone('America/Los_Angeles')
+        return datetime.now(pacific)
+    try:
+        return datetime.fromisoformat(value)
+    except Exception:
+        pacific = pytz.timezone('America/Los_Angeles')
+        return datetime.now(pacific)
+
+def _next_candle_close(trigger_time: datetime, minutes: int) -> datetime:
+    base = trigger_time.replace(second=0, microsecond=0)
+    remainder = base.minute % minutes
+    # Always move to the next candle close (full candle delay)
+    delta_minutes = minutes if remainder == 0 else (minutes - remainder)
+    return base + timedelta(minutes=delta_minutes)
+
+def _calculate_ema_confirmation_time(timeframe: str, trigger_time: datetime) -> Optional[datetime]:
+    tf = (timeframe or "").upper()
+    if tf in EMA_CLOSE_CONFIRM_TIMEFRAMES:
+        minutes = int(tf.replace("MIN", ""))
+        return _next_candle_close(trigger_time, minutes)
+    if tf in EMA_DELAY_15_MIN_TIMEFRAMES:
+        return trigger_time + timedelta(minutes=15)
+    return None
+
+def _cancel_pending_task(symbol: str, timeframe: str):
+    key = _pending_task_key(symbol, timeframe)
+    task = PENDING_EMA_TASKS.get(key)
+    if task and not task.done():
+        task.cancel()
+    PENDING_EMA_TASKS.pop(key, None)
+
+def _cancel_pending_tasks(symbol: Optional[str] = None, timeframe: Optional[str] = None):
+    sym = symbol.upper() if symbol else None
+    tf = timeframe.upper() if timeframe else None
+    for key in list(PENDING_EMA_TASKS.keys()):
+        key_sym, key_tf = key
+        if sym and key_sym != sym:
+            continue
+        if tf and key_tf != tf:
+            continue
+        _cancel_pending_task(key_sym, key_tf)
 
 # Production settings
 PRODUCTION_MODE = True
 PRODUCTION_PORT = 8000
-PRODUCTION_DATABASE = "market_states.db"
+PRODUCTION_DATABASE = os.environ.get("MARKET_STATES_DB", "market_states.db")
 PRODUCTION_LOG_FILE = "trade_alerts.log"
 
 # Load Discord webhook URL from environment variable or config file
@@ -725,13 +782,18 @@ async def receive_sms(request: Request):
             previous_macd_status = current_state.get('macd_status', 'UNKNOWN') if current_state else 'UNKNOWN'
             parsed_data['_previous_macd_status'] = previous_macd_status
             parsed_data['_current_ema_status'] = current_state.get('ema_status', 'UNKNOWN') if current_state else 'UNKNOWN'
-        
-        # Update system state based on detected crossovers
-        update_system_state(parsed_data)
-        
-        # Analyze the data and check for alerts
-        # Run in background to avoid blocking response
-        if alert_config.enabled:
+
+        # EMA crossovers: create pending confirmation (delayed) when applicable
+        ema_pending_handled = False
+        if parsed_data.get('action') == 'moving_average_crossover':
+            ema_pending_handled = _create_pending_ema(parsed_data)
+
+        # Update system state based on detected crossovers (skip delayed EMA)
+        if not ema_pending_handled:
+            update_system_state(parsed_data)
+
+        # Analyze the data and check for alerts (skip delayed EMA)
+        if alert_config.enabled and not ema_pending_handled:
             alert_triggered = analyze_data(parsed_data)
             
             if alert_triggered:
@@ -1064,6 +1126,165 @@ def update_system_state(parsed_data: Dict[str, Any]):
             
     except Exception as e:
         logger.error(f"Error updating system state: {e}")
+
+def _create_pending_ema(parsed_data: Dict[str, Any]) -> bool:
+    """Create a pending EMA signal and schedule confirmation if needed."""
+    try:
+        symbol = (parsed_data.get('symbol') or 'SPY').upper()
+        timeframe = (parsed_data.get('timeframe') or '').upper()
+        direction = (parsed_data.get('ema_direction') or '').lower()
+        price = parsed_data.get('price')
+
+        if not timeframe:
+            logger.warning(f"[PENDING EMA] Missing timeframe for {symbol}")
+            return False
+        if direction not in ['bullish', 'bearish']:
+            logger.warning(f"[PENDING EMA] Invalid EMA direction: {direction}")
+            return False
+
+        pacific = pytz.timezone('America/Los_Angeles')
+        trigger_time = datetime.now(pacific)
+        parsed_data['trigger_time'] = trigger_time.isoformat()
+
+        confirmation_time = _calculate_ema_confirmation_time(timeframe, trigger_time)
+        if confirmation_time is None:
+            # No delay for this timeframe; allow immediate processing
+            return False
+
+        # If already confirmed in this direction, do nothing
+        current_state = state_manager.get_timeframe_state(symbol, timeframe)
+        current_ema_status = (current_state.get('ema_status') if current_state else 'UNKNOWN') or 'UNKNOWN'
+        if current_ema_status == direction.upper():
+            logger.info(f"[PENDING EMA] No pending created: {symbol} {timeframe} already {direction.upper()}")
+            return True
+
+        existing = state_manager.get_pending_signal(symbol, timeframe, 'ema')
+        if existing:
+            existing_dir = (existing.get('direction') or '').upper()
+            if existing_dir and existing_dir != direction.upper():
+                # Flip before confirmation: discard entirely
+                logger.info(f"[PENDING EMA] Flip detected before confirmation: {symbol} {timeframe} {existing_dir} -> {direction.upper()} (discarding)")
+                state_manager.delete_pending_signal(symbol, timeframe, 'ema')
+                _cancel_pending_task(symbol, timeframe)
+                return True
+            # Same direction pending exists; keep earliest pending and ensure task is scheduled
+            logger.info(f"[PENDING EMA] Pending already exists: {symbol} {timeframe} {existing_dir}")
+            if _pending_task_key(symbol, timeframe) not in PENDING_EMA_TASKS:
+                task = asyncio.create_task(
+                    _confirm_pending_ema_signal(
+                        symbol, timeframe, existing_dir, existing.get('trigger_time'), existing.get('trigger_price')
+                    )
+                )
+                PENDING_EMA_TASKS[_pending_task_key(symbol, timeframe)] = task
+            return True
+
+        # Create new pending record
+        success = state_manager.upsert_pending_signal(
+            symbol=symbol,
+            timeframe=timeframe,
+            crossover_type='ema',
+            direction=direction,
+            trigger_time=trigger_time.isoformat(),
+            trigger_price=price
+        )
+        if not success:
+            logger.error(f"[PENDING EMA] Failed to create pending signal: {symbol} {timeframe}")
+            return True
+
+        # Schedule confirmation task
+        _cancel_pending_task(symbol, timeframe)
+        task = asyncio.create_task(
+            _confirm_pending_ema_signal(
+                symbol, timeframe, direction.upper(), trigger_time.isoformat(), price
+            )
+        )
+        PENDING_EMA_TASKS[_pending_task_key(symbol, timeframe)] = task
+        logger.info(f"[PENDING EMA] Scheduled confirmation: {symbol} {timeframe} {direction.upper()} at {confirmation_time.isoformat()}")
+        return True
+    except Exception as e:
+        logger.error(f"[PENDING EMA] Failed to create pending EMA: {e}")
+        return False
+
+async def _confirm_pending_ema_signal(
+    symbol: str,
+    timeframe: str,
+    direction: str,
+    trigger_time_str: Optional[str],
+    trigger_price: Optional[float]
+):
+    try:
+        trigger_time = _parse_trigger_time(trigger_time_str)
+        confirmation_time = _calculate_ema_confirmation_time(timeframe, trigger_time)
+        if confirmation_time is None:
+            return
+
+        # Sleep until confirmation time
+        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
+        delay = max(0, (confirmation_time - now).total_seconds())
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        # Re-check pending signal at confirmation time
+        pending = state_manager.get_pending_signal(symbol, timeframe, 'ema')
+        if not pending:
+            return
+        if (pending.get('direction') or '').upper() != direction.upper():
+            return
+        if trigger_time_str and pending.get('trigger_time') != trigger_time_str:
+            return
+
+        # Update confirmed EMA state
+        parsed_data = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "price": trigger_price,
+            "action": "moving_average_crossover",
+            "ema_direction": direction.lower()
+        }
+        update_system_state(parsed_data)
+
+        # Apply time/weekend filters before sending
+        if analyze_data(parsed_data):
+            log_data = {
+                "timestamp": datetime.now().isoformat(),
+                "sender": "pending_ema_confirm",
+                "original_message": "",
+                "parsed_data": parsed_data
+            }
+            await send_discord_alert(log_data)
+        else:
+            logger.info(f"[PENDING EMA] Confirmation filtered by time/weekend rules: {symbol} {timeframe}")
+
+        state_manager.delete_pending_signal(symbol, timeframe, 'ema')
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.error(f"[PENDING EMA] Confirmation failed for {symbol} {timeframe}: {e}")
+
+async def _resume_pending_ema_tasks():
+    try:
+        pending = state_manager.get_pending_signals('ema')
+        if not pending:
+            return
+        for item in pending:
+            symbol = (item.get('symbol') or '').upper()
+            timeframe = (item.get('timeframe') or '').upper()
+            direction = (item.get('direction') or '').upper()
+            trigger_time = item.get('trigger_time')
+            trigger_price = item.get('trigger_price')
+            if not symbol or not timeframe or not direction:
+                continue
+            if _pending_task_key(symbol, timeframe) in PENDING_EMA_TASKS:
+                continue
+            task = asyncio.create_task(
+                _confirm_pending_ema_signal(
+                    symbol, timeframe, direction, trigger_time, trigger_price
+                )
+            )
+            PENDING_EMA_TASKS[_pending_task_key(symbol, timeframe)] = task
+        logger.info(f"[PENDING EMA] Resumed {len(PENDING_EMA_TASKS)} pending EMA confirmations")
+    except Exception as e:
+        logger.error(f"[PENDING EMA] Failed to resume pending EMA tasks: {e}")
 
 def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
@@ -1627,6 +1848,7 @@ async def _daily_scheduler_task():
 async def _start_scheduler():
     try:
         asyncio.create_task(_daily_scheduler_task())
+        asyncio.create_task(_resume_pending_ema_tasks())
         logger.info("Daily EMA summary scheduler started (06:30 PT)")
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")
@@ -1640,6 +1862,30 @@ async def admin_send_daily_ema_summaries():
     except Exception as e:
         logger.error(f"admin send daily summaries failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/pending-ema", tags=["Admin"])
+async def admin_get_pending_ema():
+    """List pending EMA confirmations."""
+    pending = state_manager.get_pending_signals("ema")
+    return {"count": len(pending), "pending": pending}
+
+@app.post("/admin/pending-ema/clear", tags=["Admin"])
+async def admin_clear_pending_ema(request: PendingClearRequest):
+    """Clear pending EMA confirmations (optionally filtered)."""
+    symbol = request.symbol
+    timeframe = request.timeframe
+    _cancel_pending_tasks(symbol=symbol, timeframe=timeframe)
+    deleted = state_manager.delete_pending_signals(
+        crossover_type="ema",
+        symbol=symbol,
+        timeframe=timeframe
+    )
+    return {
+        "status": "success",
+        "deleted": deleted,
+        "symbol": symbol,
+        "timeframe": timeframe
+    }
 
 @app.get("/config", tags=["Config"], include_in_schema=False) 
 async def get_config():

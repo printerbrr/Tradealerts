@@ -88,6 +88,22 @@ class StateManager:
                         UNIQUE(symbol, tag)
                     )
                 ''')
+
+                # Create pending_signals table for delayed confirmation (EMA first)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS pending_signals (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        symbol TEXT NOT NULL,
+                        timeframe TEXT NOT NULL,
+                        crossover_type TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        trigger_time TEXT NOT NULL,
+                        trigger_price REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(symbol, timeframe, crossover_type)
+                    )
+                ''')
                 
                 conn.commit()
                 logger.info(f"[DEV] Database initialized: {self.database_path}")
@@ -424,6 +440,159 @@ class StateManager:
                 summary['macd_bearish_count'] += 1
         
         return summary
+
+    def upsert_pending_signal(
+        self,
+        symbol: str,
+        timeframe: str,
+        crossover_type: str,
+        direction: str,
+        trigger_time: str,
+        trigger_price: Optional[float] = None
+    ) -> bool:
+        """Create or update a pending signal (unique per symbol/timeframe/type)."""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO pending_signals (
+                        symbol, timeframe, crossover_type, direction, trigger_time, trigger_price, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(symbol, timeframe, crossover_type) DO UPDATE SET
+                        direction = excluded.direction,
+                        trigger_time = excluded.trigger_time,
+                        trigger_price = excluded.trigger_price,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (
+                    symbol.upper(),
+                    timeframe.upper(),
+                    crossover_type.lower(),
+                    direction.upper(),
+                    trigger_time,
+                    trigger_price
+                ))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"[DEV] Failed to upsert pending signal: {e}")
+            return False
+
+    def get_pending_signal(
+        self,
+        symbol: str,
+        timeframe: str,
+        crossover_type: str = "ema"
+    ) -> Optional[Dict[str, Any]]:
+        """Get a pending signal for a specific symbol/timeframe/type."""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT symbol, timeframe, crossover_type, direction, trigger_time, trigger_price, created_at, updated_at
+                    FROM pending_signals
+                    WHERE symbol = ? AND timeframe = ? AND crossover_type = ?
+                ''', (symbol.upper(), timeframe.upper(), crossover_type.lower()))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {
+                    "symbol": row[0],
+                    "timeframe": row[1],
+                    "crossover_type": row[2],
+                    "direction": row[3],
+                    "trigger_time": row[4],
+                    "trigger_price": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7]
+                }
+        except Exception as e:
+            logger.error(f"[DEV] Failed to get pending signal: {e}")
+            return None
+
+    def get_pending_signals(self, crossover_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all pending signals, optionally filtered by crossover_type."""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                if crossover_type:
+                    cursor.execute('''
+                        SELECT symbol, timeframe, crossover_type, direction, trigger_time, trigger_price, created_at, updated_at
+                        FROM pending_signals
+                        WHERE crossover_type = ?
+                    ''', (crossover_type.lower(),))
+                else:
+                    cursor.execute('''
+                        SELECT symbol, timeframe, crossover_type, direction, trigger_time, trigger_price, created_at, updated_at
+                        FROM pending_signals
+                    ''')
+                rows = cursor.fetchall()
+                results = []
+                for row in rows:
+                    results.append({
+                        "symbol": row[0],
+                        "timeframe": row[1],
+                        "crossover_type": row[2],
+                        "direction": row[3],
+                        "trigger_time": row[4],
+                        "trigger_price": row[5],
+                        "created_at": row[6],
+                        "updated_at": row[7]
+                    })
+                return results
+        except Exception as e:
+            logger.error(f"[DEV] Failed to get pending signals: {e}")
+            return []
+
+    def delete_pending_signal(
+        self,
+        symbol: str,
+        timeframe: str,
+        crossover_type: str = "ema"
+    ) -> bool:
+        """Delete a pending signal for a specific symbol/timeframe/type."""
+        try:
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM pending_signals
+                    WHERE symbol = ? AND timeframe = ? AND crossover_type = ?
+                ''', (symbol.upper(), timeframe.upper(), crossover_type.lower()))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"[DEV] Failed to delete pending signal: {e}")
+            return False
+
+    def delete_pending_signals(
+        self,
+        crossover_type: Optional[str] = None,
+        symbol: Optional[str] = None,
+        timeframe: Optional[str] = None
+    ) -> int:
+        """Delete pending signals with optional filters. Returns count deleted."""
+        try:
+            conditions = []
+            params = []
+            if crossover_type:
+                conditions.append("crossover_type = ?")
+                params.append(crossover_type.lower())
+            if symbol:
+                conditions.append("symbol = ?")
+                params.append(symbol.upper())
+            if timeframe:
+                conditions.append("timeframe = ?")
+                params.append(timeframe.upper())
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+            with sqlite3.connect(self.database_path, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"DELETE FROM pending_signals {where_clause}", params)
+                deleted = cursor.rowcount if cursor.rowcount is not None else 0
+                conn.commit()
+                return deleted
+        except Exception as e:
+            logger.error(f"[DEV] Failed to delete pending signals: {e}")
+            return 0
 
     def ensure_symbol_exists(self, symbol: str):
         """Ensure there is at least one row for a symbol to make it visible in queries."""
