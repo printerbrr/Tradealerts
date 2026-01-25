@@ -100,11 +100,18 @@ alert_config = AlertConfig()
 # Pending EMA confirmation tasks (keyed by symbol/timeframe)
 PENDING_EMA_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
 
+# Pending VWAP confirmation tasks (keyed by symbol/band_type)
+PENDING_VWAP_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
+PENDING_VWAP_DATA: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
 EMA_CLOSE_CONFIRM_TIMEFRAMES = {"1MIN", "5MIN", "15MIN"}
 EMA_DELAY_15_MIN_TIMEFRAMES = {"30MIN", "1HR", "2HR", "4HR"}
 
 def _pending_task_key(symbol: str, timeframe: str) -> Tuple[str, str]:
     return (symbol.upper(), timeframe.upper())
+
+def _vwap_pending_key(symbol: str, band_type: str) -> Tuple[str, str]:
+    return (symbol.upper(), band_type.upper())
 
 def _parse_trigger_time(value: Optional[str]) -> datetime:
     if not value:
@@ -123,6 +130,18 @@ def _next_candle_close(trigger_time: datetime, minutes: int) -> datetime:
     delta_minutes = minutes if remainder == 0 else (minutes - remainder)
     return base + timedelta(minutes=delta_minutes)
 
+def _parse_vwap_trigger_time(value: Optional[Any]) -> datetime:
+    pacific = pytz.timezone('America/Los_Angeles')
+    if isinstance(value, datetime):
+        return value if value.tzinfo else pacific.localize(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.strptime(value.strip(), "%m/%d/%y %H:%M:%S")
+            return pacific.localize(parsed)
+        except Exception:
+            pass
+    return datetime.now(pacific)
+
 def _calculate_ema_confirmation_time(timeframe: str, trigger_time: datetime) -> Optional[datetime]:
     tf = (timeframe or "").upper()
     if tf in EMA_CLOSE_CONFIRM_TIMEFRAMES:
@@ -138,6 +157,13 @@ def _cancel_pending_task(symbol: str, timeframe: str):
     if task and not task.done():
         task.cancel()
     PENDING_EMA_TASKS.pop(key, None)
+
+def _cancel_pending_vwap_task(symbol: str, band_type: str):
+    key = _vwap_pending_key(symbol, band_type)
+    task = PENDING_VWAP_TASKS.get(key)
+    if task and not task.done():
+        task.cancel()
+    PENDING_VWAP_TASKS.pop(key, None)
 
 def _cancel_pending_tasks(symbol: Optional[str] = None, timeframe: Optional[str] = None):
     sym = symbol.upper() if symbol else None
@@ -754,11 +780,11 @@ async def receive_sms(request: Request):
                     logger.info(f"VWAP ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
                     return {"status": "success", "message": "VWAP alert received but filtered (outside hours)"}
             
-            # Filters passed - send to Discord using VWAP alert webhook (in background to avoid blocking)
-            asyncio.create_task(send_vwap_alert_to_discord(parsed_data))
+            # Filters passed - delay until 5-minute candle close
+            _create_pending_vwap(parsed_data)
             
             # Return immediately to prevent Tasker timeout
-            return {"status": "success", "message": "VWAP alert received and processing"}
+            return {"status": "success", "message": "VWAP alert received and pending confirmation"}
         
         # Parse the SMS data for regular alerts
         parsed_data = parse_sms_data(message)
@@ -1285,6 +1311,74 @@ async def _resume_pending_ema_tasks():
         logger.info(f"[PENDING EMA] Resumed {len(PENDING_EMA_TASKS)} pending EMA confirmations")
     except Exception as e:
         logger.error(f"[PENDING EMA] Failed to resume pending EMA tasks: {e}")
+
+def _create_pending_vwap(parsed_data: Dict[str, Any]) -> bool:
+    """Create or update a pending VWAP alert and schedule confirmation."""
+    try:
+        symbol = (parsed_data.get("symbol") or "SPY").upper()
+        band_type = (parsed_data.get("band_type") or "").upper()
+        if band_type not in {"UPPER", "LOWER"}:
+            logger.warning(f"[PENDING VWAP] Invalid band type: {band_type}")
+            return False
+
+        trigger_time = _parse_vwap_trigger_time(parsed_data.get("trigger_time"))
+        confirmation_time = _next_candle_close(trigger_time, 5)
+        key = _vwap_pending_key(symbol, band_type)
+
+        existing = PENDING_VWAP_DATA.get(key)
+        if existing:
+            existing_confirm = existing.get("confirmation_time")
+            if isinstance(existing_confirm, datetime) and existing_confirm == confirmation_time:
+                # Same candle close - update latest data only
+                existing.update({
+                    "parsed_data": dict(parsed_data),
+                    "confirmation_time": confirmation_time
+                })
+                logger.info(f"[PENDING VWAP] Updated pending VWAP for {symbol} {band_type} @ {confirmation_time.isoformat()}")
+                return True
+
+        # New candle close - replace pending and reschedule
+        _cancel_pending_vwap_task(symbol, band_type)
+        PENDING_VWAP_DATA[key] = {
+            "parsed_data": dict(parsed_data),
+            "confirmation_time": confirmation_time
+        }
+
+        task = asyncio.create_task(
+            _confirm_pending_vwap_signal(symbol, band_type, confirmation_time)
+        )
+        PENDING_VWAP_TASKS[key] = task
+        logger.info(f"[PENDING VWAP] Scheduled confirmation: {symbol} {band_type} at {confirmation_time.isoformat()}")
+        return True
+    except Exception as e:
+        logger.error(f"[PENDING VWAP] Failed to create pending VWAP: {e}")
+        return False
+
+async def _confirm_pending_vwap_signal(symbol: str, band_type: str, confirmation_time: datetime):
+    try:
+        # Sleep until confirmation time
+        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
+        delay = max(0, (confirmation_time - now).total_seconds())
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        key = _vwap_pending_key(symbol, band_type)
+        pending = PENDING_VWAP_DATA.get(key)
+        if not pending:
+            return
+        pending_confirm = pending.get("confirmation_time")
+        if not isinstance(pending_confirm, datetime) or pending_confirm != confirmation_time:
+            return
+
+        parsed_data = pending.get("parsed_data", {})
+        await send_vwap_alert_to_discord(parsed_data)
+        PENDING_VWAP_DATA.pop(key, None)
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.error(f"[PENDING VWAP] Confirmation failed for {symbol} {band_type}: {e}")
+    finally:
+        _cancel_pending_vwap_task(symbol, band_type)
 
 def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     """
