@@ -43,15 +43,21 @@ class StateManager:
                         timeframe TEXT NOT NULL,
                         ema_status TEXT DEFAULT 'UNKNOWN',
                         macd_status TEXT DEFAULT 'UNKNOWN',
+                        vwap_status TEXT DEFAULT 'UNKNOWN',
                         last_ema_update TIMESTAMP,
                         last_macd_update TIMESTAMP,
+                        last_vwap_update TIMESTAMP,
                         last_ema_price REAL,
                         last_macd_price REAL,
+                        last_vwap_price REAL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(symbol, timeframe)
                     )
                 ''')
+
+                # Ensure new columns exist for older databases
+                self._ensure_timeframe_states_columns(cursor)
                 
                 # Create state_history table for tracking changes
                 cursor.execute('''
@@ -111,6 +117,23 @@ class StateManager:
         except Exception as e:
             logger.error(f"[DEV] Failed to initialize database: {e}")
             raise
+
+    def _ensure_timeframe_states_columns(self, cursor):
+        """Add any missing columns to timeframe_states (non-destructive migrations)."""
+        try:
+            cursor.execute("PRAGMA table_info(timeframe_states)")
+            existing = {row[1] for row in cursor.fetchall()}
+            additions = {
+                "vwap_status": "TEXT DEFAULT 'UNKNOWN'",
+                "last_vwap_update": "TIMESTAMP",
+                "last_vwap_price": "REAL"
+            }
+            for column, ddl in additions.items():
+                if column not in existing:
+                    cursor.execute(f"ALTER TABLE timeframe_states ADD COLUMN {column} {ddl}")
+                    logger.info(f"[DEV] Added column to timeframe_states: {column}")
+        except Exception as e:
+            logger.warning(f"[DEV] Failed to ensure timeframe_states columns: {e}")
     
     def update_timeframe_state(self, symbol: str, timeframe: str, crossover_type: str, direction: str, price: Optional[float] = None):
         """
@@ -131,7 +154,7 @@ class StateManager:
             direction = direction.upper()
             
             # Validate inputs
-            if crossover_type not in ['ema', 'macd']:
+            if crossover_type not in ['ema', 'macd', 'vwap']:
                 logger.error(f"[DEV] Invalid crossover_type: {crossover_type}")
                 return False
             
@@ -147,7 +170,8 @@ class StateManager:
                 
                 # Get current state
                 cursor.execute('''
-                    SELECT ema_status, macd_status, last_ema_price, last_macd_price
+                    SELECT ema_status, macd_status, vwap_status,
+                           last_ema_price, last_macd_price, last_vwap_price
                     FROM timeframe_states 
                     WHERE symbol = ? AND timeframe = ?
                 ''', (symbol, timeframe))
@@ -156,21 +180,33 @@ class StateManager:
                 
                 if result:
                     # Update existing record
-                    current_ema_status, current_macd_status, current_ema_price, current_macd_price = result
+                    current_ema_status, current_macd_status, current_vwap_status, current_ema_price, current_macd_price, current_vwap_price = result
                     
                     # Determine what to update
                     if crossover_type == 'ema':
                         new_ema_status = direction
                         new_macd_status = current_macd_status
+                        new_vwap_status = current_vwap_status
                         new_ema_price = price
                         new_macd_price = current_macd_price
+                        new_vwap_price = current_vwap_price
                         old_status = current_ema_status
-                    else:  # macd
+                    elif crossover_type == 'macd':
                         new_ema_status = current_ema_status
                         new_macd_status = direction
+                        new_vwap_status = current_vwap_status
                         new_ema_price = current_ema_price
                         new_macd_price = price
+                        new_vwap_price = current_vwap_price
                         old_status = current_macd_status
+                    else:  # vwap
+                        new_ema_status = current_ema_status
+                        new_macd_status = current_macd_status
+                        new_vwap_status = direction
+                        new_ema_price = current_ema_price
+                        new_macd_price = current_macd_price
+                        new_vwap_price = price
+                        old_status = current_vwap_status
                     
                     # Update the record, preserving the non-updated crossover's timestamp
                     if crossover_type == 'ema':
@@ -181,6 +217,8 @@ class StateManager:
                                 last_ema_price = ?,
                                 macd_status = ?,
                                 last_macd_price = ?,
+                                vwap_status = ?,
+                                last_vwap_price = ?,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE symbol = ? AND timeframe = ?
                         ''', (
@@ -189,9 +227,11 @@ class StateManager:
                             new_ema_price,
                             new_macd_status,
                             new_macd_price,
+                            new_vwap_status,
+                            new_vwap_price,
                             symbol, timeframe
                         ))
-                    else:
+                    elif crossover_type == 'macd':
                         cursor.execute('''
                             UPDATE timeframe_states 
                             SET macd_status = ?,
@@ -199,6 +239,8 @@ class StateManager:
                                 last_macd_price = ?,
                                 ema_status = ?,
                                 last_ema_price = ?,
+                                vwap_status = ?,
+                                last_vwap_price = ?,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE symbol = ? AND timeframe = ?
                         ''', (
@@ -207,29 +249,59 @@ class StateManager:
                             new_macd_price,
                             new_ema_status,
                             new_ema_price,
+                            new_vwap_status,
+                            new_vwap_price,
+                            symbol, timeframe
+                        ))
+                    else:
+                        cursor.execute('''
+                            UPDATE timeframe_states 
+                            SET vwap_status = ?,
+                                last_vwap_update = ?,
+                                last_vwap_price = ?,
+                                ema_status = ?,
+                                last_ema_price = ?,
+                                macd_status = ?,
+                                last_macd_price = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE symbol = ? AND timeframe = ?
+                        ''', (
+                            new_vwap_status,
+                            datetime.now(),
+                            new_vwap_price,
+                            new_ema_status,
+                            new_ema_price,
+                            new_macd_status,
+                            new_macd_price,
                             symbol, timeframe
                         ))
                     
                 else:
                     # Create new record
                     if crossover_type == 'ema':
-                        ema_status, macd_status = direction, 'UNKNOWN'
-                        ema_price, macd_price = price, None
+                        ema_status, macd_status, vwap_status = direction, 'UNKNOWN', 'UNKNOWN'
+                        ema_price, macd_price, vwap_price = price, None, None
                         old_status = 'UNKNOWN'
-                    else:  # macd
-                        ema_status, macd_status = 'UNKNOWN', direction
-                        ema_price, macd_price = None, price
+                    elif crossover_type == 'macd':
+                        ema_status, macd_status, vwap_status = 'UNKNOWN', direction, 'UNKNOWN'
+                        ema_price, macd_price, vwap_price = None, price, None
+                        old_status = 'UNKNOWN'
+                    else:  # vwap
+                        ema_status, macd_status, vwap_status = 'UNKNOWN', 'UNKNOWN', direction
+                        ema_price, macd_price, vwap_price = None, None, price
                         old_status = 'UNKNOWN'
                     
                     cursor.execute('''
                         INSERT INTO timeframe_states 
-                        (symbol, timeframe, ema_status, macd_status, 
-                         last_ema_update, last_macd_update, last_ema_price, last_macd_price)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (symbol, timeframe, ema_status, macd_status,
+                        (symbol, timeframe, ema_status, macd_status, vwap_status,
+                         last_ema_update, last_macd_update, last_vwap_update,
+                         last_ema_price, last_macd_price, last_vwap_price)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (symbol, timeframe, ema_status, macd_status, vwap_status,
                           datetime.now() if crossover_type == 'ema' else None,
                           datetime.now() if crossover_type == 'macd' else None,
-                          ema_price, macd_price))
+                          datetime.now() if crossover_type == 'vwap' else None,
+                          ema_price, macd_price, vwap_price))
                 
                 # Commit the main state update before writing to history to avoid overlapping write locks
                 conn.commit()
@@ -253,8 +325,10 @@ class StateManager:
             with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT ema_status, macd_status, last_ema_update, last_macd_update,
-                           last_ema_price, last_macd_price, created_at, updated_at
+                    SELECT ema_status, macd_status, vwap_status,
+                           last_ema_update, last_macd_update, last_vwap_update,
+                           last_ema_price, last_macd_price, last_vwap_price,
+                           created_at, updated_at
                     FROM timeframe_states 
                     WHERE symbol = ? AND timeframe = ?
                 ''', (symbol, timeframe))
@@ -267,12 +341,15 @@ class StateManager:
                         'timeframe': timeframe,
                         'ema_status': result[0],
                         'macd_status': result[1],
-                        'last_ema_update': result[2],
-                        'last_macd_update': result[3],
-                        'last_ema_price': result[4],
-                        'last_macd_price': result[5],
-                        'created_at': result[6],
-                        'updated_at': result[7]
+                        'vwap_status': result[2],
+                        'last_ema_update': result[3],
+                        'last_macd_update': result[4],
+                        'last_vwap_update': result[5],
+                        'last_ema_price': result[6],
+                        'last_macd_price': result[7],
+                        'last_vwap_price': result[8],
+                        'created_at': result[9],
+                        'updated_at': result[10]
                     }
                 else:
                     return None
@@ -331,8 +408,10 @@ class StateManager:
             with sqlite3.connect(self.database_path, timeout=30) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT timeframe, ema_status, macd_status, last_ema_update, last_macd_update,
-                           last_ema_price, last_macd_price, created_at, updated_at
+                    SELECT timeframe, ema_status, macd_status, vwap_status,
+                           last_ema_update, last_macd_update, last_vwap_update,
+                           last_ema_price, last_macd_price, last_vwap_price,
+                           created_at, updated_at
                     FROM timeframe_states 
                     WHERE symbol = ?
                     ORDER BY 
@@ -359,12 +438,15 @@ class StateManager:
                         'timeframe': timeframe,
                         'ema_status': result[1],
                         'macd_status': result[2],
-                        'last_ema_update': result[3],
-                        'last_macd_update': result[4],
-                        'last_ema_price': result[5],
-                        'last_macd_price': result[6],
-                        'created_at': result[7],
-                        'updated_at': result[8]
+                        'vwap_status': result[3],
+                        'last_ema_update': result[4],
+                        'last_macd_update': result[5],
+                        'last_vwap_update': result[6],
+                        'last_ema_price': result[7],
+                        'last_macd_price': result[8],
+                        'last_vwap_price': result[9],
+                        'created_at': result[10],
+                        'updated_at': result[11]
                     }
                 
                 return states
@@ -420,13 +502,16 @@ class StateManager:
             'ema_bearish_count': 0,
             'macd_bullish_count': 0,
             'macd_bearish_count': 0,
+            'vwap_bullish_count': 0,
+            'vwap_bearish_count': 0,
             'timeframes': {}
         }
         
         for timeframe, state in states.items():
             summary['timeframes'][timeframe] = {
                 'ema_status': state['ema_status'],
-                'macd_status': state['macd_status']
+                'macd_status': state['macd_status'],
+                'vwap_status': state.get('vwap_status', 'UNKNOWN')
             }
             
             if state['ema_status'] == 'BULLISH':
@@ -438,6 +523,11 @@ class StateManager:
                 summary['macd_bullish_count'] += 1
             elif state['macd_status'] == 'BEARISH':
                 summary['macd_bearish_count'] += 1
+
+            if state.get('vwap_status') == 'BULLISH':
+                summary['vwap_bullish_count'] += 1
+            elif state.get('vwap_status') == 'BEARISH':
+                summary['vwap_bearish_count'] += 1
         
         return summary
 
@@ -604,8 +694,8 @@ class StateManager:
                 if not exists:
                     cursor.execute(
                         """
-                        INSERT INTO timeframe_states (symbol, timeframe, ema_status, macd_status)
-                        VALUES (?, '5MIN', 'UNKNOWN', 'UNKNOWN')
+                        INSERT INTO timeframe_states (symbol, timeframe, ema_status, macd_status, vwap_status)
+                        VALUES (?, '5MIN', 'UNKNOWN', 'UNKNOWN', 'UNKNOWN')
                         """,
                         (symbol.upper(),)
                     )

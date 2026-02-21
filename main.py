@@ -104,6 +104,10 @@ PENDING_EMA_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
 PENDING_VWAP_TASKS: Dict[Tuple[str, str], asyncio.Task] = {}
 PENDING_VWAP_DATA: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
+# Pending VWAP cross confirmation tasks (keyed by symbol)
+PENDING_VWAP_CROSS_TASKS: Dict[str, asyncio.Task] = {}
+PENDING_VWAP_CROSS_DATA: Dict[str, Dict[str, Any]] = {}
+
 EMA_CLOSE_CONFIRM_TIMEFRAMES = {"1MIN", "5MIN", "15MIN"}
 EMA_DELAY_15_MIN_TIMEFRAMES = {"30MIN", "1HR", "2HR", "4HR"}
 
@@ -112,6 +116,9 @@ def _pending_task_key(symbol: str, timeframe: str) -> Tuple[str, str]:
 
 def _vwap_pending_key(symbol: str, band_type: str) -> Tuple[str, str]:
     return (symbol.upper(), band_type.upper())
+
+def _vwap_cross_pending_key(symbol: str) -> str:
+    return symbol.upper()
 
 def _parse_trigger_time(value: Optional[str]) -> datetime:
     if not value:
@@ -164,6 +171,13 @@ def _cancel_pending_vwap_task(symbol: str, band_type: str):
     if task and not task.done():
         task.cancel()
     PENDING_VWAP_TASKS.pop(key, None)
+
+def _cancel_pending_vwap_cross_task(symbol: str):
+    key = _vwap_cross_pending_key(symbol)
+    task = PENDING_VWAP_CROSS_TASKS.get(key)
+    if task and not task.done():
+        task.cancel()
+    PENDING_VWAP_CROSS_TASKS.pop(key, None)
 
 def _cancel_pending_tasks(symbol: Optional[str] = None, timeframe: Optional[str] = None):
     sym = symbol.upper() if symbol else None
@@ -749,42 +763,45 @@ async def receive_sms(request: Request):
             # Return immediately to prevent Tasker timeout
             return {"status": "success", "message": "Price alert received and processing"}
         
-        # Check if this is a VWAP band crossing alert (applies time/weekend filters)
-        is_vwap_alert = (
-            "vwap" in message_lower and 
-            ("upperband" in message_lower or "lowerband" in message_lower)
-        )
-        
-        if is_vwap_alert:
-            # Route to VWAP alert handler (with time/weekend filters)
-            logger.info("Detected VWAP band crossing alert in SMS - routing to VWAP alert handler")
-            parsed_data = parse_vwap_alert(message)
-            
-            # Check time/weekend filters (same as regular alerts)
-            # datetime and pytz are already imported at the top of the file
-            pacific = pytz.timezone('America/Los_Angeles')
-            current_time_pacific = datetime.now(pacific)
-            
-            # Check for weekend (Saturday=5, Sunday=6) - market is closed
-            if not alert_config.parameters.get('ignore_weekend_filter', False):
-                weekday = current_time_pacific.weekday()
-                if weekday >= 5:  # Saturday (5) or Sunday (6)
-                    logger.info(f"VWAP ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
-                    return {"status": "success", "message": "VWAP alert received but filtered (weekend)"}
-            
-            # Check time filter (5 AM - 1 PM PST/PDT)
-            if not alert_config.parameters.get('ignore_time_filter', False):
-                current_hour = current_time_pacific.hour
-                # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
-                if 13 <= current_hour or current_hour < 5:
-                    logger.info(f"VWAP ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
-                    return {"status": "success", "message": "VWAP alert received but filtered (outside hours)"}
-            
-            # Filters passed - delay until 5-minute candle close
-            _create_pending_vwap(parsed_data)
-            
-            # Return immediately to prevent Tasker timeout
-            return {"status": "success", "message": "VWAP alert received and pending confirmation"}
+        # VWAP band crossing alerts are currently disabled.
+        # To re-enable, uncomment this block.
+        #
+        # # Check if this is a VWAP band crossing alert (applies time/weekend filters)
+        # is_vwap_alert = (
+        #     "vwap" in message_lower and 
+        #     ("upperband" in message_lower or "lowerband" in message_lower)
+        # )
+        # 
+        # if is_vwap_alert:
+        #     # Route to VWAP alert handler (with time/weekend filters)
+        #     logger.info("Detected VWAP band crossing alert in SMS - routing to VWAP alert handler")
+        #     parsed_data = parse_vwap_alert(message)
+        #     
+        #     # Check time/weekend filters (same as regular alerts)
+        #     # datetime and pytz are already imported at the top of the file
+        #     pacific = pytz.timezone('America/Los_Angeles')
+        #     current_time_pacific = datetime.now(pacific)
+        #     
+        #     # Check for weekend (Saturday=5, Sunday=6) - market is closed
+        #     if not alert_config.parameters.get('ignore_weekend_filter', False):
+        #         weekday = current_time_pacific.weekday()
+        #         if weekday >= 5:  # Saturday (5) or Sunday (6)
+        #             logger.info(f"VWAP ALERT FILTERED: Current day is weekend ({current_time_pacific.strftime('%A')}) - market is closed")
+        #             return {"status": "success", "message": "VWAP alert received but filtered (weekend)"}
+        #     
+        #     # Check time filter (5 AM - 1 PM PST/PDT)
+        #     if not alert_config.parameters.get('ignore_time_filter', False):
+        #         current_hour = current_time_pacific.hour
+        #         # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
+        #         if 13 <= current_hour or current_hour < 5:
+        #             logger.info(f"VWAP ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+        #             return {"status": "success", "message": "VWAP alert received but filtered (outside hours)"}
+        #     
+        #     # Filters passed - delay until 5-minute candle close
+        #     _create_pending_vwap(parsed_data)
+        #     
+        #     # Return immediately to prevent Tasker timeout
+        #     return {"status": "success", "message": "VWAP alert received and pending confirmation"}
         
         # Parse the SMS data for regular alerts
         parsed_data = parse_sms_data(message)
@@ -813,6 +830,14 @@ async def receive_sms(request: Request):
         ema_pending_handled = False
         if parsed_data.get('action') == 'moving_average_crossover':
             ema_pending_handled = _create_pending_ema(parsed_data)
+
+        # VWAP cross alerts: delay until 5MIN candle close and stop further processing
+        if parsed_data.get('action') == 'vwap_crossover':
+            try:
+                _create_pending_vwap_cross(parsed_data)
+            except Exception as task_error:
+                logger.error(f"Failed to create VWAP cross pending task: {task_error}")
+            return {"status": "success", "message": "VWAP cross alert received and pending confirmation"}
 
         # Update system state based on detected crossovers (skip delayed EMA)
         if not ema_pending_handled:
@@ -949,6 +974,18 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
             else:
                 # Default to bullish if direction not specified
                 parsed["macd_direction"] = "bullish"
+        
+        # Detect VWAP crossover signals (simple SMS format)
+        elif "vwap cross" in message_lower:
+            parsed["action"] = "vwap_crossover"
+            parsed["timeframe"] = "5MIN"
+            
+            if "bullish" in message_lower:
+                parsed["vwap_direction"] = "bullish"
+            elif "bearish" in message_lower:
+                parsed["vwap_direction"] = "bearish"
+            else:
+                parsed["vwap_direction"] = "bullish"
         
         # Detect EMA crossover signals - improved detection
         elif any(keyword in message_lower for keyword in ["movingavgcrossover", "crossover", "ema cross", "moving average", "length1", "length2", "exponential"]):
@@ -1147,6 +1184,25 @@ def update_system_state(parsed_data: Dict[str, Any]):
                 else:
                     logger.info(f"EMA STATUS UNCHANGED: {symbol} {timeframe} EMA already {direction.upper()}")
         
+        # Update VWAP crossover state
+        elif parsed_data.get('action') == 'vwap_crossover':
+            direction = parsed_data.get('vwap_direction', 'unknown')
+            if direction in ['bullish', 'bearish']:
+                # Check if current VWAP status is different
+                current_vwap_status = current_state.get('vwap_status', 'UNKNOWN') if current_state else 'UNKNOWN'
+                
+                if current_vwap_status != direction.upper():
+                    logger.info(f"VWAP STATUS CHANGE DETECTED: {symbol} {timeframe} VWAP {current_vwap_status} -> {direction.upper()}")
+                    success = state_manager.update_timeframe_state(
+                        symbol, timeframe, 'vwap', direction, price
+                    )
+                    if success:
+                        logger.info(f"STATE UPDATE: {symbol} {timeframe} VWAP -> {direction.upper()}")
+                    else:
+                        logger.error(f"Failed to update VWAP state for {symbol} {timeframe}")
+                else:
+                    logger.info(f"VWAP STATUS UNCHANGED: {symbol} {timeframe} VWAP already {direction.upper()}")
+        
         else:
             logger.debug(f"No state update needed for action: {parsed_data.get('action')}")
             
@@ -1312,6 +1368,95 @@ async def _resume_pending_ema_tasks():
     except Exception as e:
         logger.error(f"[PENDING EMA] Failed to resume pending EMA tasks: {e}")
 
+def _create_pending_vwap_cross(parsed_data: Dict[str, Any]) -> bool:
+    """Create or update a pending VWAP cross alert and schedule confirmation."""
+    try:
+        symbol = (parsed_data.get("symbol") or "SPY").upper()
+        direction = (parsed_data.get("vwap_direction") or "").lower()
+        timeframe = (parsed_data.get("timeframe") or "5MIN").upper()
+        if direction not in ["bullish", "bearish"]:
+            logger.warning(f"[PENDING VWAP CROSS] Invalid direction: {direction}")
+            return False
+        if timeframe != "5MIN":
+            logger.warning(f"[PENDING VWAP CROSS] Unexpected timeframe {timeframe}, forcing 5MIN")
+            parsed_data["timeframe"] = "5MIN"
+
+        pacific = pytz.timezone('America/Los_Angeles')
+        trigger_time = datetime.now(pacific)
+        parsed_data["trigger_time"] = trigger_time.isoformat()
+
+        confirmation_time = _next_candle_close(trigger_time, 5)
+        key = _vwap_cross_pending_key(symbol)
+
+        existing = PENDING_VWAP_CROSS_DATA.get(key)
+        if existing:
+            existing_confirm = existing.get("confirmation_time")
+            if isinstance(existing_confirm, datetime) and existing_confirm == confirmation_time:
+                existing.update({
+                    "parsed_data": dict(parsed_data),
+                    "confirmation_time": confirmation_time
+                })
+                logger.info(f"[PENDING VWAP CROSS] Updated pending VWAP cross for {symbol} @ {confirmation_time.isoformat()}")
+                return True
+
+        _cancel_pending_vwap_cross_task(symbol)
+        PENDING_VWAP_CROSS_DATA[key] = {
+            "parsed_data": dict(parsed_data),
+            "confirmation_time": confirmation_time
+        }
+
+        task = asyncio.create_task(
+            _confirm_pending_vwap_cross(symbol, confirmation_time)
+        )
+        PENDING_VWAP_CROSS_TASKS[key] = task
+        logger.info(f"[PENDING VWAP CROSS] Scheduled confirmation: {symbol} at {confirmation_time.isoformat()}")
+        return True
+    except Exception as e:
+        logger.error(f"[PENDING VWAP CROSS] Failed to create pending VWAP cross: {e}")
+        return False
+
+async def _confirm_pending_vwap_cross(symbol: str, confirmation_time: datetime):
+    try:
+        # Sleep until confirmation time
+        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
+        delay = max(0, (confirmation_time - now).total_seconds())
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        key = _vwap_cross_pending_key(symbol)
+        pending = PENDING_VWAP_CROSS_DATA.get(key)
+        if not pending:
+            return
+        pending_confirm = pending.get("confirmation_time")
+        if not isinstance(pending_confirm, datetime) or pending_confirm != confirmation_time:
+            return
+
+        parsed_data = pending.get("parsed_data", {})
+        update_system_state(parsed_data)
+
+        # Apply time/weekend filters before sending
+        pacific = pytz.timezone('America/Los_Angeles')
+        current_time_pacific = datetime.now(pacific)
+        if not alert_config.parameters.get('ignore_weekend_filter', False):
+            weekday = current_time_pacific.weekday()
+            if weekday >= 5:
+                logger.info(f"[PENDING VWAP CROSS] Filtered on weekend for {symbol}")
+                return
+        if not alert_config.parameters.get('ignore_time_filter', False):
+            current_hour = current_time_pacific.hour
+            if 13 <= current_hour or current_hour < 5:
+                logger.info(f"[PENDING VWAP CROSS] Filtered outside hours for {symbol}")
+                return
+
+        await send_vwap_cross_alert_to_discord(parsed_data)
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.error(f"[PENDING VWAP CROSS] Confirmation failed for {symbol}: {e}")
+    finally:
+        PENDING_VWAP_CROSS_DATA.pop(_vwap_cross_pending_key(symbol), None)
+        _cancel_pending_vwap_cross_task(symbol)
+
 def _create_pending_vwap(parsed_data: Dict[str, Any]) -> bool:
     """Create or update a pending VWAP alert and schedule confirmation."""
     try:
@@ -1387,14 +1532,10 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     
     New Alert Conditions (MACD Crossovers Only):
     For Bullish "Call" signals:
-    1. Previous MACD status was BEARISH (below 0)
-    2. MACD histogram crosses above 0 (bullish cross)
-    3. Current timeframe EMA is BULLISH (confluence with MACD)
+    1. MACD histogram crosses above 0 (bullish cross)
     
     For Bearish "Put" signals:
-    1. Previous MACD status was BULLISH (above 0)
-    2. MACD histogram crosses below 0 (bearish cross)
-    3. Current timeframe EMA is BEARISH (confluence with MACD)
+    1. MACD histogram crosses below 0 (bearish cross)
     """
     # Check if we should send alerts based on time (1 PM - 4:59 AM PST/PDT = no alerts)
     # Allow bypass via config for after-hours testing
@@ -1439,51 +1580,18 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
             logger.info(f"ALERT FILTERED: Invalid MACD direction: {macd_direction}")
             return False
         
-        # Get previous MACD status (before the update that just happened)
-        previous_macd_status = parsed_data.get('_previous_macd_status', 'UNKNOWN')
-        
-        # Get current EMA status (before the update)
-        current_ema_status = parsed_data.get('_current_ema_status', 'UNKNOWN')
-        
-        # If we don't have the previous state cached, try to get it from history
-        if previous_macd_status == 'UNKNOWN':
-            previous_macd_status = state_manager.get_previous_macd_status(symbol, timeframe) or 'UNKNOWN'
-        
-        # If we still don't have EMA status, get it from current state
-        if current_ema_status == 'UNKNOWN':
-            current_state = state_manager.get_timeframe_state(symbol, timeframe)
-            current_ema_status = current_state.get('ema_status', 'UNKNOWN') if current_state else 'UNKNOWN'
-        
-        logger.info(f"MACD ALERT CHECK: {symbol} {timeframe} - Previous MACD: {previous_macd_status}, Current MACD: {macd_direction}, Current EMA: {current_ema_status}")
+        logger.info(f"MACD ALERT CHECK: {symbol} {timeframe} - Current MACD: {macd_direction}")
         
         # Check conditions for Bullish "Call" signal
         if macd_direction == 'BULLISH':
-            # Condition 1: Previous MACD was BEARISH (below 0)
-            if previous_macd_status != 'BEARISH':
-                logger.info(f"ALERT FILTERED: Bullish MACD crossover requires previous status BEARISH, but was {previous_macd_status}")
-                return False
-            
-            # Condition 2: MACD crosses above 0 (bullish cross) - already verified by macd_direction == 'BULLISH'
-            # Condition 3: Current timeframe EMA must be BULLISH (confluence)
-            if current_ema_status != 'BULLISH':
-                logger.info(f"ALERT FILTERED: Bullish MACD crossover requires EMA confluence (BULLISH), but EMA is {current_ema_status}")
-                return False
+            # Condition 1: MACD crosses above 0 (bullish cross) - already verified by macd_direction == 'BULLISH'
             
             logger.info(f"MACD CALL SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bullish Call signal")
             return True
         
         # Check conditions for Bearish "Put" signal
         elif macd_direction == 'BEARISH':
-            # Condition 1: Previous MACD was BULLISH (above 0)
-            if previous_macd_status != 'BULLISH':
-                logger.info(f"ALERT FILTERED: Bearish MACD crossover requires previous status BULLISH, but was {previous_macd_status}")
-                return False
-            
-            # Condition 2: MACD crosses below 0 (bearish cross) - already verified by macd_direction == 'BEARISH'
-            # Condition 3: Current timeframe EMA must be BEARISH (confluence)
-            if current_ema_status != 'BEARISH':
-                logger.info(f"ALERT FILTERED: Bearish MACD crossover requires EMA confluence (BEARISH), but EMA is {current_ema_status}")
-                return False
+            # Condition 1: MACD crosses below 0 (bearish cross) - already verified by macd_direction == 'BEARISH'
             
             logger.info(f"MACD PUT SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bearish Put signal")
             return True
@@ -2661,6 +2769,14 @@ def format_vwap_alert_discord(parsed_data: Dict[str, Any]) -> str:
     logger.info(f"Formatted VWAP alert message: {formatted_message[:100]}...")
     return formatted_message
 
+def format_vwap_cross_discord(parsed_data: Dict[str, Any]) -> str:
+    """Format VWAP cross message for Discord."""
+    direction = (parsed_data.get("vwap_direction") or "bullish").upper()
+    if direction not in ["BULLISH", "BEARISH"]:
+        direction = "BULLISH"
+    end_circle = "🟢" if direction == "BULLISH" else "🔴"
+    return f"🟠 VWAP {direction} Cross {end_circle}"
+
 async def send_vwap_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
     """
     Send VWAP alert to Discord using the separate VWAP alert webhook.
@@ -2719,6 +2835,48 @@ async def send_vwap_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
             
     except Exception as e:
         logger.error(f"Error sending VWAP alert to Discord: {str(e)}")
+        return False
+
+async def send_vwap_cross_alert_to_discord(parsed_data: Dict[str, Any]) -> bool:
+    """Send VWAP cross alert to Discord using the VWAP webhook."""
+    try:
+        webhook_url = webhook_manager.get_vwap_alert_webhook() or VWAP_ALERT_WEBHOOK_URL
+        if not webhook_url:
+            logger.warning("VWAP alert webhook URL not configured - cannot send VWAP cross alert")
+            return False
+        
+        formatted_message = format_vwap_cross_discord(parsed_data)
+        payload = {"content": formatted_message}
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+                if response.status_code == 204:
+                    logger.info("VWAP cross alert sent to Discord successfully")
+                    return True
+                
+                error_msg = f"Failed to send VWAP cross alert: {response.status_code}"
+                try:
+                    response_text = response.text
+                    if response_text:
+                        error_msg += f" - Response: {response_text[:200]}"
+                except Exception:
+                    pass
+                logger.error(error_msg)
+                return False
+            except httpx.TimeoutException:
+                logger.error("VWAP cross webhook timeout after 10 seconds")
+                return False
+            except httpx.RequestError as e:
+                logger.error(f"VWAP cross webhook request error: {e}")
+                return False
+    except Exception as e:
+        logger.error(f"Error sending VWAP cross alert to Discord: {str(e)}")
         return False
 
 @app.post("/webhook/price-alert", tags=["Ingest"])
