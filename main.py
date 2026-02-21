@@ -1444,7 +1444,7 @@ async def _confirm_pending_vwap_cross(symbol: str, confirmation_time: datetime):
                 return
         if not alert_config.parameters.get('ignore_time_filter', False):
             current_hour = current_time_pacific.hour
-            if 13 <= current_hour or current_hour < 5:
+            if 13 <= current_hour or current_hour < 6 or (current_hour == 6 and current_time_pacific.minute < 30):
                 logger.info(f"[PENDING VWAP CROSS] Filtered outside hours for {symbol}")
                 return
 
@@ -1537,7 +1537,7 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     For Bearish "Put" signals:
     1. MACD histogram crosses below 0 (bearish cross)
     """
-    # Check if we should send alerts based on time (1 PM - 4:59 AM PST/PDT = no alerts)
+    # Check if we should send alerts based on time (1 PM - 6:29 AM PST/PDT = no alerts)
     # Allow bypass via config for after-hours testing
     import pytz
     from datetime import datetime
@@ -1558,9 +1558,9 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
     if not alert_config.parameters.get('ignore_time_filter', False):
         current_hour = current_time_pacific.hour
         
-        # No alerts between 1 PM (13:00) and 4:59 AM (4:59)
-        if 13 <= current_hour or current_hour < 5:
-            logger.info(f"ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (5 AM - 1 PM PST/PDT)")
+        # No alerts between 1 PM (13:00) and 6:29 AM (6:29)
+        if 13 <= current_hour or current_hour < 6 or (current_hour == 6 and current_time_pacific.minute < 30):
+            logger.info(f"ALERT FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (6:30 AM - 1 PM PST/PDT)")
             return False
     else:
         logger.info("Time filter bypassed via config (ignore_time_filter=true)")

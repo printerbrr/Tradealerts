@@ -60,13 +60,13 @@ def analyze_alternative_channel(parsed_data: Dict[str, Any]) -> bool:
        - P1: 1MIN bearish + 5MIN must be BEARISH
     2. C5/P5 (5MIN EMA): Always send, regardless of other timeframes
     
-    Time Filter: 6 AM - 1 PM PST/PDT only
+    Time Filter: 6:30 AM - 1 PM PST/PDT only
     Weekend Filter: No alerts on Saturday/Sunday
     
     Returns True if alert should be sent to alternative channel
     """
     try:
-        # Time filter: 6 AM - 1 PM PST/PDT only
+        # Time filter: 6:30 AM - 1 PM PST/PDT only
         pacific = pytz.timezone('America/Los_Angeles')
         current_time_pacific = datetime.now(pacific)
         
@@ -78,9 +78,9 @@ def analyze_alternative_channel(parsed_data: Dict[str, Any]) -> bool:
         
         # Time filter: No alerts outside 6 AM - 1 PM PST/PDT
         current_hour = current_time_pacific.hour
-        # No alerts between 1 PM (13:00) and 5:59 AM (5:59)
-        if 13 <= current_hour or current_hour < 6:
-            logger.info(f"ALTERNATIVE CHANNEL FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (6 AM - 1 PM PST/PDT)")
+        # No alerts between 1 PM (13:00) and 6:29 AM (6:29)
+        if 13 <= current_hour or current_hour < 6 or (current_hour == 6 and current_time_pacific.minute < 30):
+            logger.info(f"ALTERNATIVE CHANNEL FILTERED: Current time {current_time_pacific.strftime('%I:%M %p')} is outside alert hours (6:30 AM - 1 PM PST/PDT)")
             return False
         
         action = parsed_data.get('action')
