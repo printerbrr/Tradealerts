@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import os
+import time
+
+import httpx
 
 from dotenv import load_dotenv
 
@@ -111,9 +114,36 @@ class SchwabClient:
         # for 0DTE/1DTE in the paper executor. The Schwab client defaults
         # contract type appropriately, so we omit that argument here
         # for maximum compatibility across schwab-py versions.
-        resp = self._client.get_option_chain(symbol=underlying)
-        resp.raise_for_status()
-        return resp.json()
+        #
+        # Add a tiny retry for transient Schwab 5xx errors to avoid
+        # skipping paper trades on brief upstream glitches.
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                resp = self._client.get_option_chain(symbol=underlying)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                # Only retry on 5xx server-side errors.
+                if 500 <= status < 600 and attempt < 2:
+                    last_exc = exc
+                    time.sleep(0.5)
+                    continue
+                raise
+            except httpx.RequestError as exc:
+                # Network problems: one quick retry, then bubble up.
+                if attempt < 2:
+                    last_exc = exc
+                    time.sleep(0.5)
+                    continue
+                raise
+
+        # Should be unreachable because we either returned or raised,
+        # but keep a fallback to satisfy type checkers.
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Unexpected failure fetching option chain")
 
     def place_order(self, proposed_order: Any, policy: Dict[str, Any]) -> Dict[str, Any]:
         """
