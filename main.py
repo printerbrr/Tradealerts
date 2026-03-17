@@ -1337,6 +1337,12 @@ def _create_pending_vwap_cross(parsed_data: Dict[str, Any]) -> bool:
 
 async def _confirm_pending_vwap_cross(symbol: str, confirmation_time: datetime):
     try:
+        # Sleep until confirmation time
+        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
+        delay = max(0, (confirmation_time - now).total_seconds())
+        if delay > 0:
+            await asyncio.sleep(delay)
+
         key = _vwap_cross_pending_key(symbol)
         pending = PENDING_VWAP_CROSS_DATA.get(key)
         if not pending:
@@ -1415,6 +1421,12 @@ def _create_pending_vwap(parsed_data: Dict[str, Any]) -> bool:
 
 async def _confirm_pending_vwap_signal(symbol: str, band_type: str, confirmation_time: datetime):
     try:
+        # Sleep until confirmation time
+        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
+        delay = max(0, (confirmation_time - now).total_seconds())
+        if delay > 0:
+            await asyncio.sleep(delay)
+
         key = _vwap_pending_key(symbol, band_type)
         pending = PENDING_VWAP_DATA.get(key)
         if not pending:
@@ -1904,8 +1916,9 @@ async def _daily_scheduler_task():
             # Schedule for next Monday at 6:30 AM
             target = now.replace(hour=6, minute=30, second=0, microsecond=0)
             target = target + timedelta(days=days_until_monday)
-            logger.info(f"Weekend detected ({now.strftime('%A')}), daily summary will be sent immediately when run.")
-            await send_daily_ema_summaries()
+            seconds = (target - now).total_seconds()
+            logger.info(f"Weekend detected ({now.strftime('%A')}), scheduling next summary for Monday {target.strftime('%Y-%m-%d %I:%M %p %Z')}")
+            await asyncio.sleep(seconds)
             continue
         
         # Calculate target time for today (or next weekday if past 6:30 AM)
@@ -1918,13 +1931,29 @@ async def _daily_scheduler_task():
             while target.weekday() >= 5:
                 target = target + timedelta(days=1)
         
-        # Delay logic disabled; run summary immediately
+        # sleep until target
+        seconds = (target - now).total_seconds()
+        try:
+            await asyncio.sleep(seconds)
+        except Exception:
+            # in case of sleep interruption, retry quickly
+            await asyncio.sleep(5)
+            continue
+        
+        # After waking up, check if we already ran today (prevent duplicates)
         now_check = datetime.now(pacific)
         today_str = now_check.strftime('%Y-%m-%d')
         last_summary_date = state_manager.get_metadata('last_daily_summary_date')
         
         if last_summary_date == today_str:
             logger.warning(f"Daily EMA summary already sent today ({today_str}), skipping duplicate run")
+            # Schedule for tomorrow (or next weekday)
+            from datetime import timedelta
+            target = now_check.replace(hour=6, minute=30, second=0, microsecond=0) + timedelta(days=1)
+            while target.weekday() >= 5:  # Skip weekends
+                target = target + timedelta(days=1)
+            seconds = (target - now_check).total_seconds()
+            await asyncio.sleep(seconds)
             continue
         
         try:
