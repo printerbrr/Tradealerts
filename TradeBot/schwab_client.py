@@ -107,11 +107,11 @@ class SchwabClient:
 
         # schwab-py exposes the HTTP client; use the documented
         # option chain endpoint wrapper if available.
-        # We request expirations for today only (0DTE).
+        # Request full option chain for the underlying; we will filter
+        # for 0DTE/1DTE in the paper executor.
         resp = self._client.get_option_chain(
             symbol=underlying,
             contract_type="ALL",
-            include_quotes=True,
         )
         resp.raise_for_status()
         return resp.json()
