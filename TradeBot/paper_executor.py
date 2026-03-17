@@ -234,6 +234,7 @@ def _select_0dte_option_for_signal(
 ) -> Optional[Dict[str, Any]]:
     """
     Pick a 0DTE option with delta closest to +/-0.20, depending on direction.
+    If no true 0DTE contract is found, fall back to 1DTE.
     """
 
     try:
@@ -248,47 +249,92 @@ def _select_0dte_option_for_signal(
 
     target_delta = 0.20 if direction == "bullish" else -0.20
 
-    best: Optional[Dict[str, Any]] = None
-    best_diff: Optional[float] = None
-
     # Schwab option chain JSON is nested; we use a best-effort traversal
-    # over all options, looking for calls or puts with a delta field.
+    # over all options, looking for calls or puts with a delta field and
+    # a specific days-to-expiration (DTE).
     option_chain = chain.get("optionChain") or chain
     expirations = option_chain.get("callExpDateMap", {})
     put_expirations = option_chain.get("putExpDateMap", {})
 
-    def _scan_map(exp_map: Dict[str, Any], is_call: bool) -> None:
-        nonlocal best, best_diff
-        for exp_key, strikes in exp_map.items():
-            for strike_key, contracts in strikes.items():
-                for c in contracts:
-                    option_type = c.get("putCall")
-                    if is_call and option_type != "CALL":
-                        continue
-                    if not is_call and option_type != "PUT":
-                        continue
-                    delta = c.get("delta")
-                    try:
-                        if delta is None:
+    def _parse_dte(exp_key: str, contract: Dict[str, Any]) -> Optional[int]:
+        """Best-effort extraction of DTE from contract or expiration key."""
+        dte = contract.get("daysToExpiration")
+        if isinstance(dte, int):
+            return dte
+        if isinstance(dte, str):
+            try:
+                return int(dte)
+            except ValueError:
+                pass
+        # Fallback: Schwab/TDA-style keys often look like '2026-03-17:0'
+        date_part = (exp_key or "").split(":", 1)[0]
+        try:
+            from datetime import date
+            exp_date = datetime.strptime(date_part, "%Y-%m-%d").date()
+            return (exp_date - date.today()).days
+        except Exception:
+            return None
+
+    def _scan_for_dte(target_dtes: set[int]) -> Optional[Dict[str, Any]]:
+        best_local: Optional[Dict[str, Any]] = None
+        best_diff_local: Optional[float] = None
+
+        def _scan_map(exp_map: Dict[str, Any], is_call: bool) -> None:
+            nonlocal best_local, best_diff_local
+            for exp_key, strikes in exp_map.items():
+                for strike_key, contracts in strikes.items():
+                    for c in contracts:
+                        dte = _parse_dte(exp_key, c)
+                        if dte is None or dte not in target_dtes:
                             continue
-                        delta_val = float(delta)
-                    except (TypeError, ValueError):
-                        continue
-                    diff = abs(delta_val - target_delta)
-                    if best_diff is None or diff < best_diff:
-                        best_diff = diff
-                        best = {
-                            "symbol": c.get("symbol") or c.get("optionSymbol") or "",
-                            "strike": float(c.get("strikePrice")) if c.get("strikePrice") is not None else None,
-                            "expiration": c.get("expirationDate") or exp_key,
-                            "delta": delta_val,
-                            "quote": c.get("quote") or {},
-                        }
 
-    if direction == "bullish":
-        _scan_map(expirations, is_call=True)
-    else:
-        _scan_map(put_expirations, is_call=False)
+                        option_type = c.get("putCall")
+                        if is_call and option_type != "CALL":
+                            continue
+                        if not is_call and option_type != "PUT":
+                            continue
 
-    return best
+                        delta = c.get("delta")
+                        try:
+                            if delta is None:
+                                continue
+                            delta_val = float(delta)
+                        except (TypeError, ValueError):
+                            continue
+
+                        diff = abs(delta_val - target_delta)
+                        if best_diff_local is None or diff < best_diff_local:
+                            best_diff_local = diff
+                            best_local = {
+                                "symbol": c.get("symbol") or c.get("optionSymbol") or "",
+                                "strike": float(c.get("strikePrice")) if c.get("strikePrice") is not None else None,
+                                "expiration": c.get("expirationDate") or exp_key,
+                                "delta": delta_val,
+                                "quote": c.get("quote") or {},
+                                "dte": dte,
+                            }
+
+        if direction == "bullish":
+            _scan_map(expirations, is_call=True)
+        else:
+            _scan_map(put_expirations, is_call=False)
+
+        return best_local
+
+    # First, try strict 0DTE.
+    best_0dte = _scan_for_dte({0})
+    if best_0dte is not None:
+        return best_0dte
+
+    # If no 0DTE contract is suitable, fall back to 1DTE.
+    best_1dte = _scan_for_dte({1})
+    if best_1dte is not None:
+        logger.info(
+            "No suitable 0DTE option found for %s; using 1DTE fallback expiring %s.",
+            signal.symbol,
+            best_1dte.get("expiration"),
+        )
+        return best_1dte
+
+    return None
 
