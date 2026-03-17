@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 
 import schwab
 from schwab.auth import easy_client, client_from_token_file
-from schwab.client.base import ContractType
 
 # Load .env so SCHWAB_* vars are available when running outside the main app (e.g. one-liner test).
 load_dotenv()
@@ -109,11 +108,10 @@ class SchwabClient:
         # schwab-py exposes the HTTP client; use the documented
         # option chain endpoint wrapper if available.
         # Request full option chain for the underlying; we will filter
-        # for 0DTE/1DTE in the paper executor.
-        resp = self._client.get_option_chain(
-            symbol=underlying,
-            contract_type=ContractType.ALL,
-        )
+        # for 0DTE/1DTE in the paper executor. The Schwab client defaults
+        # contract type appropriately, so we omit that argument here
+        # for maximum compatibility across schwab-py versions.
+        resp = self._client.get_option_chain(symbol=underlying)
         resp.raise_for_status()
         return resp.json()
 
