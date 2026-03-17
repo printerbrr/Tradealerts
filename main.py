@@ -20,6 +20,9 @@ from confluence_rules import confluence_rules
 from webhook_manager import webhook_manager
 from alert_toggle_manager import alert_toggle_manager
 from alternative_channel import send_to_alternative_channel, set_alternative_webhook, get_alternative_webhook
+from TradeBot.models import Signal
+from TradeBot.paper_executor import paper_execute_trade
+from TradeBot.schwab_client import SchwabClient
 
 # NEW: imports for scheduler/timezone
 import asyncio
@@ -36,6 +39,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+PAPER_TRADE_ENABLED = os.getenv("PAPER_TRADE_ENABLED", "0") == "1"
+_schwab_client: Optional[SchwabClient] = None
 
 app = FastAPI(
     title="Trade Alerts SMS Parser",
@@ -852,6 +858,40 @@ async def receive_sms(request: Request):
                     asyncio.create_task(send_discord_alert(log_data))
                 except Exception as task_error:
                     logger.error(f"Failed to create Discord alert task: {task_error}")
+
+                # Optional: send signal to TradeBot paper-trading framework
+                if PAPER_TRADE_ENABLED:
+                    try:
+                        global _schwab_client
+                        if _schwab_client is None:
+                            _schwab_client = SchwabClient({})
+
+                        signal = Signal(
+                            symbol=parsed_data.get("symbol", symbol),
+                            timeframe=parsed_data.get("timeframe") or "",
+                            tag=log_data.get("tag") or "",
+                            direction=parsed_data.get("ema_direction")
+                            or parsed_data.get("macd_direction")
+                            or "",
+                            sms_price=parsed_data.get("price"),
+                            raw_data=parsed_data,
+                        )
+
+                        policy = {
+                            "enabled": True,
+                            # Placeholder: conservative default size; can be moved to env/config.
+                            "default_quantity": 1,
+                            "order_type": "market",
+                        }
+
+                        paper_execute_trade(
+                            signal=signal,
+                            policy=policy,
+                            client=_schwab_client,
+                            csv_path=None,
+                        )
+                    except Exception as paper_error:
+                        logger.error(f"Paper trading execution failed: {paper_error}")
             else:
                 # Log skipped alerts that don't match known categories
                 logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")

@@ -2,6 +2,7 @@
 discord_config.txt
 discord_webhooks.json
 price_alert_webhook.txt
+alert_toggles.json
 
 # Python
 __pycache__/
@@ -24,6 +25,10 @@ trade_alerts*.log
 # Environment
 .env
 .env.local
+
+# Schwab / TradeBot
+schwab_token.json
+paper_trades.csv
 
 # IDE
 .vscode/

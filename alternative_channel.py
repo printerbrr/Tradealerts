@@ -54,16 +54,14 @@ def analyze_alternative_channel(parsed_data: Dict[str, Any]) -> bool:
     """
     Analyze parsed data for alternative channel with specific rules:
     
-    Rules:
-    1. C1/P1 (1MIN EMA): Only if 5MIN EMA is in confluence
-       - C1: 1MIN bullish + 5MIN must be BULLISH
-       - P1: 1MIN bearish + 5MIN must be BEARISH
-    2. C5/P5 (5MIN EMA): Always send, regardless of other timeframes
+    EMA alerts (C1/P1, C5/P5) are disabled. The alternative channel is reserved
+    only for paper-trade BTO alerts from TradeBot; no EMA crossover alerts
+    are sent here.
     
     Time Filter: 6:30 AM - 1 PM PST/PDT only
     Weekend Filter: No alerts on Saturday/Sunday
     
-    Returns True if alert should be sent to alternative channel
+    Returns True if alert should be sent to alternative channel (currently never for EMA).
     """
     try:
         # Time filter: 6:30 AM - 1 PM PST/PDT only
@@ -99,38 +97,15 @@ def analyze_alternative_channel(parsed_data: Dict[str, Any]) -> bool:
         if ema_direction not in ['BULLISH', 'BEARISH']:
             return False
         
-        # Rule 1: 1MIN EMA crossovers - require 5MIN confluence
-        if timeframe == '1MIN':
-            # Get 5MIN EMA status
-            states = state_manager.get_all_states(symbol)
-            five_min_state = states.get('5MIN')
-            
-            if not five_min_state:
-                logger.info("ALTERNATIVE CHANNEL: 1MIN signal filtered - no 5MIN state available")
-                return False
-            
-            five_min_ema_status = (five_min_state.get('ema_status') or 'UNKNOWN').upper()
-            
-            # Check confluence: 1MIN direction must match 5MIN EMA status
-            if ema_direction == 'BULLISH' and five_min_ema_status == 'BULLISH':
-                logger.info("ALTERNATIVE CHANNEL: C1 signal - 1MIN bullish + 5MIN bullish (confluence)")
-                return True
-            elif ema_direction == 'BEARISH' and five_min_ema_status == 'BEARISH':
-                logger.info("ALTERNATIVE CHANNEL: P1 signal - 1MIN bearish + 5MIN bearish (confluence)")
-                return True
-            else:
-                logger.info(f"ALTERNATIVE CHANNEL: 1MIN signal filtered - no 5MIN confluence (1MIN={ema_direction}, 5MIN={five_min_ema_status})")
-                return False
-        
-        # Rule 2: 5MIN EMA crossovers - always send
-        elif timeframe == '5MIN':
-            logger.info(f"ALTERNATIVE CHANNEL: C5/P5 signal - 5MIN {ema_direction.lower()} (always allowed)")
-            return True
-        
-        # All other timeframes: don't send
-        else:
-            logger.info(f"ALTERNATIVE CHANNEL: Signal filtered - timeframe {timeframe} not allowed (only 1MIN and 5MIN)")
+        # Alternative channel no longer sends any EMA alerts (C1/P1 or C5/P5).
+        # That channel is reserved only for paper-trade BTO alerts from TradeBot.
+        if timeframe in ('1MIN', '5MIN'):
+            logger.info(f"ALTERNATIVE CHANNEL: {timeframe} EMA signals disabled (channel reserved for paper-trade BTO alerts only)")
             return False
+        
+        # No other timeframes allowed
+        logger.info(f"ALTERNATIVE CHANNEL: Signal filtered - timeframe {timeframe} not allowed")
+        return False
         
     except Exception as e:
         logger.error(f"Error analyzing alternative channel signal: {e}")
