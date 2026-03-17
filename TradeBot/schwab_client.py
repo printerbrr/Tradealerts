@@ -4,8 +4,13 @@ from typing import Any, Dict, Optional
 
 import os
 
+from dotenv import load_dotenv
+
 import schwab
-from schwab.auth import easy_client
+from schwab.auth import easy_client, client_from_token_file
+
+# Load .env so SCHWAB_* vars are available when running outside the main app (e.g. one-liner test).
+load_dotenv()
 
 
 class SchwabClient:
@@ -43,14 +48,40 @@ class SchwabClient:
                 "SCHWAB_APP_SECRET, and SCHWAB_REDIRECT_URI are set."
             )
 
-        # easy_client will handle the initial OAuth login (opens a browser)
-        # and subsequent token refreshes, persisting tokens to token_path.
-        self._client = easy_client(
-            api_key=self._app_key,
-            app_secret=self._app_secret,
-            callback_url=self._redirect_uri,
-            token_path=self._token_path,
-        )
+        # For Railway/headless: if SCHWAB_TOKEN_JSON is set, write it to token_path
+        # and load the client strictly from that file without falling back to
+        # an interactive browser flow.
+        token_json = os.getenv("SCHWAB_TOKEN_JSON")
+        if token_json:
+            try:
+                with open(self._token_path, "w") as f:
+                    f.write(token_json.strip())
+                # Log to stdout so we can verify on Railway that the env var was seen.
+                print(
+                    f"[TradeBot] SCHWAB_TOKEN_JSON detected, wrote token to {self._token_path}"
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to write SCHWAB_TOKEN_JSON to {self._token_path}: {e}"
+                ) from e
+
+            # In headless environments, never attempt browser-assisted login.
+            # If the token is bad, this will raise, which is safer and easier
+            # to diagnose than hanging for user input.
+            self._client = client_from_token_file(
+                token_path=self._token_path,
+                api_key=self._app_key,
+                app_secret=self._app_secret,
+            )
+        else:
+            # Local/dev: use easy_client which will open a browser for the first
+            # login and then refresh tokens automatically.
+            self._client = easy_client(
+                api_key=self._app_key,
+                app_secret=self._app_secret,
+                callback_url=self._redirect_uri,
+                token_path=self._token_path,
+            )
 
     def get_quote(self, symbol: str) -> Dict[str, Any]:
         """
