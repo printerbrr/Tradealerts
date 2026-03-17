@@ -115,7 +115,7 @@ PENDING_VWAP_CROSS_TASKS: Dict[str, asyncio.Task] = {}
 PENDING_VWAP_CROSS_DATA: Dict[str, Dict[str, Any]] = {}
 
 EMA_CLOSE_CONFIRM_TIMEFRAMES = {"1MIN", "5MIN", "15MIN"}
-EMA_DELAY_15_MIN_TIMEFRAMES = {"30MIN", "1HR", "2HR", "4HR"}
+EMA_DELAY_15_MIN_TIMEFRAMES = set()
 
 def _pending_task_key(symbol: str, timeframe: str) -> Tuple[str, str]:
     return (symbol.upper(), timeframe.upper())
@@ -156,12 +156,6 @@ def _parse_vwap_trigger_time(value: Optional[Any]) -> datetime:
     return datetime.now(pacific)
 
 def _calculate_ema_confirmation_time(timeframe: str, trigger_time: datetime) -> Optional[datetime]:
-    tf = (timeframe or "").upper()
-    if tf in EMA_CLOSE_CONFIRM_TIMEFRAMES:
-        minutes = int(tf.replace("MIN", ""))
-        return _next_candle_close(trigger_time, minutes)
-    if tf in EMA_DELAY_15_MIN_TIMEFRAMES:
-        return trigger_time + timedelta(minutes=15)
     return None
 
 def _cancel_pending_task(symbol: str, timeframe: str):
@@ -1250,82 +1244,8 @@ def update_system_state(parsed_data: Dict[str, Any]):
         logger.error(f"Error updating system state: {e}")
 
 def _create_pending_ema(parsed_data: Dict[str, Any]) -> bool:
-    """Create a pending EMA signal and schedule confirmation if needed."""
-    try:
-        symbol = (parsed_data.get('symbol') or 'SPY').upper()
-        timeframe = (parsed_data.get('timeframe') or '').upper()
-        direction = (parsed_data.get('ema_direction') or '').lower()
-        price = parsed_data.get('price')
-
-        if not timeframe:
-            logger.warning(f"[PENDING EMA] Missing timeframe for {symbol}")
-            return False
-        if direction not in ['bullish', 'bearish']:
-            logger.warning(f"[PENDING EMA] Invalid EMA direction: {direction}")
-            return False
-
-        pacific = pytz.timezone('America/Los_Angeles')
-        trigger_time = datetime.now(pacific)
-        parsed_data['trigger_time'] = trigger_time.isoformat()
-
-        confirmation_time = _calculate_ema_confirmation_time(timeframe, trigger_time)
-        if confirmation_time is None:
-            # No delay for this timeframe; allow immediate processing
-            return False
-
-        # If already confirmed in this direction, do nothing
-        current_state = state_manager.get_timeframe_state(symbol, timeframe)
-        current_ema_status = (current_state.get('ema_status') if current_state else 'UNKNOWN') or 'UNKNOWN'
-        if current_ema_status == direction.upper():
-            logger.info(f"[PENDING EMA] No pending created: {symbol} {timeframe} already {direction.upper()}")
-            return True
-
-        existing = state_manager.get_pending_signal(symbol, timeframe, 'ema')
-        if existing:
-            existing_dir = (existing.get('direction') or '').upper()
-            if existing_dir and existing_dir != direction.upper():
-                # Flip before confirmation: discard entirely
-                logger.info(f"[PENDING EMA] Flip detected before confirmation: {symbol} {timeframe} {existing_dir} -> {direction.upper()} (discarding)")
-                state_manager.delete_pending_signal(symbol, timeframe, 'ema')
-                _cancel_pending_task(symbol, timeframe)
-                return True
-            # Same direction pending exists; keep earliest pending and ensure task is scheduled
-            logger.info(f"[PENDING EMA] Pending already exists: {symbol} {timeframe} {existing_dir}")
-            if _pending_task_key(symbol, timeframe) not in PENDING_EMA_TASKS:
-                task = asyncio.create_task(
-                    _confirm_pending_ema_signal(
-                        symbol, timeframe, existing_dir, existing.get('trigger_time'), existing.get('trigger_price')
-                    )
-                )
-                PENDING_EMA_TASKS[_pending_task_key(symbol, timeframe)] = task
-            return True
-
-        # Create new pending record
-        success = state_manager.upsert_pending_signal(
-            symbol=symbol,
-            timeframe=timeframe,
-            crossover_type='ema',
-            direction=direction,
-            trigger_time=trigger_time.isoformat(),
-            trigger_price=price
-        )
-        if not success:
-            logger.error(f"[PENDING EMA] Failed to create pending signal: {symbol} {timeframe}")
-            return True
-
-        # Schedule confirmation task
-        _cancel_pending_task(symbol, timeframe)
-        task = asyncio.create_task(
-            _confirm_pending_ema_signal(
-                symbol, timeframe, direction.upper(), trigger_time.isoformat(), price
-            )
-        )
-        PENDING_EMA_TASKS[_pending_task_key(symbol, timeframe)] = task
-        logger.info(f"[PENDING EMA] Scheduled confirmation: {symbol} {timeframe} {direction.upper()} at {confirmation_time.isoformat()}")
-        return True
-    except Exception as e:
-        logger.error(f"[PENDING EMA] Failed to create pending EMA: {e}")
-        return False
+    """No-op: EMA pending confirmation delays disabled."""
+    return False
 
 async def _confirm_pending_ema_signal(
     symbol: str,
@@ -1336,48 +1256,8 @@ async def _confirm_pending_ema_signal(
 ):
     try:
         trigger_time = _parse_trigger_time(trigger_time_str)
-        confirmation_time = _calculate_ema_confirmation_time(timeframe, trigger_time)
-        if confirmation_time is None:
-            return
-
-        # Sleep until confirmation time
-        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
-        delay = max(0, (confirmation_time - now).total_seconds())
-        if delay > 0:
-            await asyncio.sleep(delay)
-
-        # Re-check pending signal at confirmation time
-        pending = state_manager.get_pending_signal(symbol, timeframe, 'ema')
-        if not pending:
-            return
-        if (pending.get('direction') or '').upper() != direction.upper():
-            return
-        if trigger_time_str and pending.get('trigger_time') != trigger_time_str:
-            return
-
-        # Update confirmed EMA state
-        parsed_data = {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "price": trigger_price,
-            "action": "moving_average_crossover",
-            "ema_direction": direction.lower()
-        }
-        update_system_state(parsed_data)
-
-        # Apply time/weekend filters before sending
-        if analyze_data(parsed_data):
-            log_data = {
-                "timestamp": datetime.now().isoformat(),
-                "sender": "pending_ema_confirm",
-                "original_message": "",
-                "parsed_data": parsed_data
-            }
-            await send_discord_alert(log_data)
-        else:
-            logger.info(f"[PENDING EMA] Confirmation filtered by time/weekend rules: {symbol} {timeframe}")
-
-        state_manager.delete_pending_signal(symbol, timeframe, 'ema')
+        # Delayed EMA confirmations disabled; function is now a no-op.
+        return
     except asyncio.CancelledError:
         return
     except Exception as e:
@@ -1457,12 +1337,6 @@ def _create_pending_vwap_cross(parsed_data: Dict[str, Any]) -> bool:
 
 async def _confirm_pending_vwap_cross(symbol: str, confirmation_time: datetime):
     try:
-        # Sleep until confirmation time
-        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
-        delay = max(0, (confirmation_time - now).total_seconds())
-        if delay > 0:
-            await asyncio.sleep(delay)
-
         key = _vwap_cross_pending_key(symbol)
         pending = PENDING_VWAP_CROSS_DATA.get(key)
         if not pending:
@@ -1541,12 +1415,6 @@ def _create_pending_vwap(parsed_data: Dict[str, Any]) -> bool:
 
 async def _confirm_pending_vwap_signal(symbol: str, band_type: str, confirmation_time: datetime):
     try:
-        # Sleep until confirmation time
-        now = datetime.now(confirmation_time.tzinfo or pytz.timezone('America/Los_Angeles'))
-        delay = max(0, (confirmation_time - now).total_seconds())
-        if delay > 0:
-            await asyncio.sleep(delay)
-
         key = _vwap_pending_key(symbol, band_type)
         pending = PENDING_VWAP_DATA.get(key)
         if not pending:
@@ -2036,9 +1904,8 @@ async def _daily_scheduler_task():
             # Schedule for next Monday at 6:30 AM
             target = now.replace(hour=6, minute=30, second=0, microsecond=0)
             target = target + timedelta(days=days_until_monday)
-            seconds = (target - now).total_seconds()
-            logger.info(f"Weekend detected ({now.strftime('%A')}), scheduling next summary for Monday {target.strftime('%Y-%m-%d %I:%M %p %Z')}")
-            await asyncio.sleep(seconds)
+            logger.info(f"Weekend detected ({now.strftime('%A')}), daily summary will be sent immediately when run.")
+            await send_daily_ema_summaries()
             continue
         
         # Calculate target time for today (or next weekday if past 6:30 AM)
@@ -2051,29 +1918,13 @@ async def _daily_scheduler_task():
             while target.weekday() >= 5:
                 target = target + timedelta(days=1)
         
-        # sleep until target
-        seconds = (target - now).total_seconds()
-        try:
-            await asyncio.sleep(seconds)
-        except Exception:
-            # in case of sleep interruption, retry quickly
-            await asyncio.sleep(5)
-            continue
-        
-        # After waking up, check if we already ran today (prevent duplicates)
+        # Delay logic disabled; run summary immediately
         now_check = datetime.now(pacific)
         today_str = now_check.strftime('%Y-%m-%d')
         last_summary_date = state_manager.get_metadata('last_daily_summary_date')
         
         if last_summary_date == today_str:
             logger.warning(f"Daily EMA summary already sent today ({today_str}), skipping duplicate run")
-            # Schedule for tomorrow (or next weekday)
-            from datetime import timedelta
-            target = now_check.replace(hour=6, minute=30, second=0, microsecond=0) + timedelta(days=1)
-            while target.weekday() >= 5:  # Skip weekends
-                target = target + timedelta(days=1)
-            seconds = (target - now_check).total_seconds()
-            await asyncio.sleep(seconds)
             continue
         
         try:

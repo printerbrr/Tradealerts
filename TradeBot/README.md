@@ -27,6 +27,19 @@ TradeBot is designed as a **pure Python library**. It does not run its own FastA
 
 ---
 
+## Railway / headless deployment (no browser)
+
+Schwab OAuth normally opens a browser once to log in. On Railway there is no browser, so use a **token created on your machine** and pass it via env:
+
+1. **On your PC:** Run the app (or a small script) that creates `SchwabClient()` once. A browser will open; log in to Schwab and approve the app. That writes `schwab_token.json` in your project folder.
+2. **Copy the token:** Open `schwab_token.json`, select all, copy. Optionally minify to one line (remove newlines) so it’s easier to paste as an env value.
+3. **In Railway:** Add a variable named `SCHWAB_TOKEN_JSON`. Paste the entire JSON as the value (one line is best; some platforms allow multi-line).
+4. **Redeploy.** The client will write that JSON to the token file path and load it, so no browser is needed.
+
+If the token expires or is refreshed, you may need to copy the updated `schwab_token.json` from a local run and update `SCHWAB_TOKEN_JSON` in Railway again (container filesystem is ephemeral).
+
+---
+
 ## Modules in this folder
 
 ### `models.py`
