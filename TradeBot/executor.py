@@ -1,13 +1,39 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from .models import ExecutionDecision, ProposedOrder, Signal, TradeLogEntry
 from .state_bridge import get_current_state
 
 logger = logging.getLogger(__name__)
+
+def _parse_state_timestamp(value: Any) -> Optional[datetime]:
+    """Best-effort parse for timestamps stored in state snapshots."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    # Handle SQLite-style UTC text and ISO-like values.
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], fmt)
+        except ValueError:
+            continue
+
+    try:
+        # Handles microseconds and timezone offsets if present.
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
 
 
 def decide_trade(
@@ -79,10 +105,13 @@ def decide_trade(
             schwab_snapshot=schwab_snapshot,
         )
 
-    # Confirm multi-timeframe EMA/MACD confluence:
-    # - 1MIN MACD agrees with the signal direction
-    # - 5MIN EMA agrees with the signal direction
-    # - 15MIN EMA agrees with the signal direction
+    # Confirm paper-trading setup:
+    # CALL:
+    #   - 1H and 4H EMA are bullish
+    #   - 15MIN EMA bullish cross happened recently
+    #   - 5MIN MACD bullish cross is the trigger signal
+    #   - 1MIN MACD bullish cross happened within 2 bars
+    # PUT is the exact opposite.
     direction = (signal.direction or "").lower()
     if direction not in ("bullish", "bearish"):
         reason = "Signal direction must be bullish or bearish."
@@ -106,12 +135,18 @@ def decide_trade(
             return v == "BEARISH"
         return False
 
+    state_snapshot["1HR"] = get_current_state(signal.symbol, "1HR")
+    state_snapshot["4HR"] = get_current_state(signal.symbol, "4HR")
+
     s1 = state_snapshot["1MIN"]
     s5 = state_snapshot["5MIN"]
     s15 = state_snapshot["15MIN"]
+    s1h = state_snapshot["1HR"]
+    s4h = state_snapshot["4HR"]
 
-    if not _matches(direction, s1.get("macd_status")):
-        reason = "1MIN MACD state does not agree with 5MIN MACD direction."
+    # 5MIN MACD cross is the trigger and must match signal direction.
+    if not _matches(direction, s5.get("macd_status")):
+        reason = "5MIN MACD state does not match the signal direction."
         logger.info("Trade skipped: %s", reason)
         return ExecutionDecision(
             should_execute=False,
@@ -122,8 +157,9 @@ def decide_trade(
             schwab_snapshot=schwab_snapshot,
         )
 
-    if not _matches(direction, s5.get("ema_status")):
-        reason = "5MIN EMA(9/21) state does not agree with 5MIN MACD direction."
+    # Higher-timeframe trend confluence: 1H + 4H EMA must align.
+    if not _matches(direction, s1h.get("ema_status")):
+        reason = "1H EMA state does not match the signal direction."
         logger.info("Trade skipped: %s", reason)
         return ExecutionDecision(
             should_execute=False,
@@ -134,8 +170,87 @@ def decide_trade(
             schwab_snapshot=schwab_snapshot,
         )
 
+    if not _matches(direction, s4h.get("ema_status")):
+        reason = "4H EMA state does not match the signal direction."
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+
+    # 15MIN EMA must match and be a recent cross.
     if not _matches(direction, s15.get("ema_status")):
-        reason = "15MIN EMA(9/21) state does not agree with 5MIN MACD direction."
+        reason = "15MIN EMA state does not match the signal direction."
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+    recent_15m_ema_bars = int(policy.get("recent_15m_ema_bars", 3))
+    last_15m_ema_ts = _parse_state_timestamp(s15.get("last_ema_update"))
+    if last_15m_ema_ts is None:
+        reason = "15MIN EMA recency check failed (missing last_ema_update)."
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+    if datetime.utcnow() - last_15m_ema_ts > timedelta(minutes=15 * recent_15m_ema_bars):
+        reason = (
+            f"15MIN EMA cross is not recent enough "
+            f"(older than {recent_15m_ema_bars} bars)."
+        )
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+
+    # 1MIN MACD must match and be within 2 bars by default.
+    if not _matches(direction, s1.get("macd_status")):
+        reason = "1MIN MACD state does not match the signal direction."
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+    one_min_macd_bars = int(policy.get("one_min_macd_bars", 2))
+    last_1m_macd_ts = _parse_state_timestamp(s1.get("last_macd_update"))
+    if last_1m_macd_ts is None:
+        reason = "1MIN MACD recency check failed (missing last_macd_update)."
+        logger.info("Trade skipped: %s", reason)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=reason,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+    if datetime.utcnow() - last_1m_macd_ts > timedelta(minutes=one_min_macd_bars):
+        reason = (
+            f"1MIN MACD cross is not within {one_min_macd_bars} bars."
+        )
         logger.info("Trade skipped: %s", reason)
         return ExecutionDecision(
             should_execute=False,
@@ -204,7 +319,7 @@ def decide_trade(
         extra={},
     )
 
-    reason = "Execution approved by policy; EMA/MACD and price checks passed."
+    reason = "Execution approved by paper-trade confluence policy and price checks."
     logger.info(
         "Trade approved for %s %s x %s (%s).",
         proposed.side,

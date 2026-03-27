@@ -1,7 +1,7 @@
 {
   "rules": [
     {
-      "name": "MACD confluence with next higher EMA",
+      "name": "MACD confluence with 5MIN EMA",
       "enabled": true,
       "trigger": {
         "timeframe": "any",
@@ -10,7 +10,7 @@
       },
       "requirements": [
         {
-          "timeframe": "next_higher",
+          "timeframe": "5MIN",
           "check": "ema_status",
           "must_be": "same_direction"
         }

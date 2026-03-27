@@ -320,18 +320,19 @@ try:
     
     # Load confluence rules
     confluence_rules.load_rules()
-    # Ensure MACD next-higher EMA confluence rule is enabled
+    # Ensure MACD confluence rule is enabled (5MIN EMA gating)
     try:
         updated = False
         for rule in confluence_rules.rules:
             name = rule.get('name', '').lower()
-            if 'macd confluence with next higher ema' in name:
+            # MACD confluence must be enabled so MACD crossover alerts can be filtered.
+            if 'macd confluence' in name:
                 if not rule.get('enabled', False):
                     rule['enabled'] = True
                     updated = True
         if updated:
             confluence_rules.save_rules()
-            logger.info("Enabled MACD next-higher EMA confluence rule")
+            logger.info("Enabled MACD confluence rule")
     except Exception as e:
         logger.warning(f"Could not enforce MACD confluence rule enablement: {e}")
     logger.info(f"Confluence rules engine initialized")
@@ -1501,23 +1502,23 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
             return False
         
         logger.info(f"MACD ALERT CHECK: {symbol} {timeframe} - Current MACD: {macd_direction}")
-        
-        # Check conditions for Bullish "Call" signal
-        if macd_direction == 'BULLISH':
-            # Condition 1: MACD crosses above 0 (bullish cross) - already verified by macd_direction == 'BULLISH'
-            
-            logger.info(f"MACD CALL SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bullish Call signal")
+
+        # MACD signals to Discord REQUIRE 5MIN EMA confluence (direction must match).
+        five_min_state = state_manager.get_timeframe_state(symbol, '5MIN')
+        five_min_ema_status = (five_min_state.get('ema_status') if five_min_state else None) or 'UNKNOWN'
+        five_min_ema_status = str(five_min_ema_status).upper()
+
+        if five_min_ema_status == macd_direction:
+            logger.info(
+                f"MACD SIGNAL TRIGGERED: {symbol} {timeframe} - 5MIN EMA confluence matched "
+                f"({five_min_ema_status} == {macd_direction})"
+            )
             return True
-        
-        # Check conditions for Bearish "Put" signal
-        elif macd_direction == 'BEARISH':
-            # Condition 1: MACD crosses below 0 (bearish cross) - already verified by macd_direction == 'BEARISH'
-            
-            logger.info(f"MACD PUT SIGNAL TRIGGERED: {symbol} {timeframe} - All conditions met for bearish Put signal")
-            return True
-        
-        # Should not reach here, but safety check
-        logger.info(f"ALERT FILTERED: MACD direction not BULLISH or BEARISH: {macd_direction}")
+
+        logger.info(
+            f"ALERT FILTERED: {symbol} {timeframe} MACD={macd_direction} blocked by 5MIN EMA="
+            f"{five_min_ema_status}"
+        )
         return False
     
     # EMA crossovers trigger alerts as before (no new conditions)
