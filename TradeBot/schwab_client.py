@@ -147,14 +147,10 @@ class SchwabClient:
 
     def place_order(self, proposed_order: Any, policy: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Placeholder for future live order support.
-
-        For the current paper-trading phase, this method should not be
-        called. When we move to live trading, we will translate the
-        ProposedOrder into a Schwab order payload and submit it here.
+        Live order placement is not supported. TradeAlerts is Discord-signaling only.
         """
 
         raise NotImplementedError(
-            "place_order is not implemented in paper-trading mode."
+            "place_order is disabled; this deployment does not send broker orders."
         )
 

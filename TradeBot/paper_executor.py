@@ -9,7 +9,6 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from .executor import decide_trade
 from .models import Signal, TradeLogEntry
 from .schwab_client import SchwabClient
 
@@ -29,90 +28,16 @@ def paper_execute_trade(
     csv_path: Optional[str] = None,
 ) -> Optional[TradeLogEntry]:
     """
-    Paper-trading execution path.
+    Disabled: this app signals via the main Discord webhooks only (see send_discord_alert).
 
-    - Fetches a fresh Schwab quote for the symbol.
-    - Runs the standard decision engine.
-    - If approved, selects 0DTE option with delta closest to +/-0.20 and sends
-      a Discord alert in format: BTO {strike}{C|P} @ {mark}
-    - Optionally appends a row to a CSV file if csv_path is set.
-
-    No live orders are sent.
+    Previously this path used Schwab quotes/option chains for simulated BTO lines.
     """
-
-    client = client or SchwabClient()
-
-    # Underlying quote for sanity checks and entry reference
-    try:
-        schwab_quote = client.get_quote(signal.symbol)
-    except Exception as exc:
-        logger.exception("Failed to fetch Schwab quote for %s: %s", signal.symbol, exc)
-        schwab_quote = {}
-
-    decision = decide_trade(signal=signal, policy=policy, schwab_quote=schwab_quote)
-
-    if not decision.should_execute:
-        logger.info("Paper trade skipped: %s", decision.reason)
-        return None
-
-    # Select a 0DTE option contract with delta closest to +/-0.20.
-    option_info = _select_0dte_option_for_signal(signal, client)
-    if option_info is None:
-        logger.info("Paper trade skipped: no suitable 0DTE option found.")
-        return None
-
-    # Build a TradeLogEntry (simulated execution).
-    entry_time = datetime.utcnow()
-    schwab_snapshot = option_info.get("quote") or decision.schwab_snapshot or schwab_quote or {}
-
-    mark_price = _best_effort_mark_price(schwab_snapshot)
-    last_price = _best_effort_last_price(schwab_snapshot)
-
-    log_entry = TradeLogEntry(
-        symbol=option_info["symbol"],
-        timeframe=signal.timeframe,
-        tag=signal.tag,
-        direction=signal.direction,
-        size=1.0,
-        order_id=None,
-        entry_requested_at=entry_time,
-        filled_at=entry_time,  # For paper trades, treat entry time as fill time.
-        requested_price=mark_price or last_price or signal.sms_price,
-        filled_price=mark_price or last_price or signal.sms_price,
-        signal_snapshot=signal.to_dict(),
-        schwab_snapshot=schwab_snapshot,
-        decision_reason=decision.reason,
-        policy_version=str(policy.get("policy_version"))
-        if policy.get("policy_version") is not None
-        else None,
-        additional_info={
-            "paper_trade": True,
-            "warnings": decision.warnings,
-            "underlying_symbol": signal.symbol,
-            "option_strike": option_info.get("strike"),
-            "option_expiration": option_info.get("expiration"),
-            "option_delta": option_info.get("delta"),
-        },
-    )
-
-    # Send BTO alert to Discord (1-minute channel)
-    _send_paper_trade_discord_alert(
-        strike=option_info.get("strike"),
-        direction=signal.direction,
-        mark=mark_price or last_price,
-    )
-
-    if csv_path:
-        _append_to_csv(log_entry, csv_path)
-
     logger.info(
-        "Paper trade logged for %s %s x %s.",
-        log_entry.direction,
-        log_entry.symbol,
-        log_entry.size,
+        "paper_execute_trade skipped (Discord-only): symbol=%s timeframe=%s",
+        getattr(signal, "symbol", None),
+        getattr(signal, "timeframe", None),
     )
-
-    return log_entry
+    return None
 
 
 def _send_paper_trade_discord_alert(

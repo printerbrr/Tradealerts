@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -34,6 +35,89 @@ def _parse_state_timestamp(value: Any) -> Optional[datetime]:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
     except ValueError:
         return None
+
+
+def _finalize_paper_approval(
+    signal: Signal,
+    policy: Dict[str, Any],
+    schwab_snapshot: Dict[str, Any],
+    state_snapshot: Dict[str, Any],
+    reason: str,
+) -> ExecutionDecision:
+    """Shared tail: price sanity, quantity, proposed order, approved decision."""
+    warnings = []
+    reference_price = signal.sms_price
+    schwab_price = None
+
+    if schwab_snapshot:
+        schwab_price = _extract_price_from_quote(schwab_snapshot)
+        if reference_price is not None and schwab_price is not None:
+            diff = abs(schwab_price - reference_price)
+            pct = diff / reference_price if reference_price != 0 else 0.0
+            max_pct = float(policy.get("max_price_deviation_pct", 0.02))
+            if pct > max_pct:
+                r = (
+                    f"Price deviation too large between SMS ({reference_price}) "
+                    f"and Schwab quote ({schwab_price}), deviation={pct:.4f}."
+                )
+                logger.info("Trade skipped: %s", r)
+                return ExecutionDecision(
+                    should_execute=False,
+                    reason=r,
+                    signal=signal,
+                    policy_snapshot=dict(policy),
+                    state_snapshot=state_snapshot,
+                    schwab_snapshot=schwab_snapshot,
+                )
+        else:
+            warnings.append("Could not compare SMS price to Schwab quote.")
+    else:
+        warnings.append("No Schwab quote provided; proceeding without quote-based checks.")
+
+    quantity = policy.get("default_quantity")
+    if not quantity:
+        r = "No default_quantity specified in execution policy."
+        logger.info("Trade skipped: %s", r)
+        return ExecutionDecision(
+            should_execute=False,
+            reason=r,
+            signal=signal,
+            policy_snapshot=dict(policy),
+            state_snapshot=state_snapshot,
+            schwab_snapshot=schwab_snapshot,
+        )
+
+    side = "buy" if signal.direction.lower() == "bullish" else "sell"
+    order_type = str(policy.get("order_type", "market")).lower()
+
+    proposed = ProposedOrder(
+        symbol=signal.symbol,
+        side=side,
+        quantity=float(quantity),
+        order_type=order_type,
+        time_in_force=str(policy.get("time_in_force", "DAY")),
+        limit_price=policy.get("limit_price"),
+        extra={},
+    )
+
+    logger.info(
+        "Trade approved for %s %s x %s (%s).",
+        proposed.side,
+        proposed.symbol,
+        proposed.quantity,
+        proposed.order_type,
+    )
+
+    return ExecutionDecision(
+        should_execute=True,
+        reason=reason,
+        signal=signal,
+        proposed_order=proposed,
+        warnings=warnings,
+        policy_snapshot=dict(policy),
+        state_snapshot=state_snapshot,
+        schwab_snapshot=schwab_snapshot,
+    )
 
 
 def decide_trade(
@@ -84,14 +168,8 @@ def decide_trade(
             schwab_snapshot=schwab_quote or {},
         )
 
-    state_snapshot = {
-        "1MIN": get_current_state(signal.symbol, "1MIN"),
-        "5MIN": get_current_state(signal.symbol, "5MIN"),
-        "15MIN": get_current_state(signal.symbol, "15MIN"),
-    }
     schwab_snapshot = schwab_quote or {}
 
-    # Placeholder: these will be replaced by concrete policy-driven checks.
     enabled = bool(policy.get("enabled", False))
     if not enabled:
         reason = "Execution disabled by policy (policy.enabled is False or missing)."
@@ -101,17 +179,10 @@ def decide_trade(
             reason=reason,
             signal=signal,
             policy_snapshot=dict(policy),
-            state_snapshot=state_snapshot,
+            state_snapshot={},
             schwab_snapshot=schwab_snapshot,
         )
 
-    # Confirm paper-trading setup:
-    # CALL:
-    #   - 1H and 4H EMA are bullish
-    #   - 15MIN EMA bullish cross happened recently
-    #   - 5MIN MACD bullish cross is the trigger signal
-    #   - 1MIN MACD bullish cross happened within 2 bars
-    # PUT is the exact opposite.
     direction = (signal.direction or "").lower()
     if direction not in ("bullish", "bearish"):
         reason = "Signal direction must be bullish or bearish."
@@ -121,9 +192,31 @@ def decide_trade(
             reason=reason,
             signal=signal,
             policy_snapshot=dict(policy),
-            state_snapshot=state_snapshot,
+            state_snapshot={},
             schwab_snapshot=schwab_snapshot,
         )
+
+    # Default: any 5MIN MACD crossover is enough (testing / option-picker validation).
+    # Set PAPER_TRADE_STRICT_CONFLUENCE=1 for 1H/4H/15m/1m multi-timeframe rules.
+    strict_confluence = os.getenv("PAPER_TRADE_STRICT_CONFLUENCE", "0") == "1"
+    if not strict_confluence:
+        state_snapshot = {"5MIN": get_current_state(signal.symbol, "5MIN")}
+        logger.info(
+            "Paper trade: simple 5MIN MACD mode (set PAPER_TRADE_STRICT_CONFLUENCE=1 for full confluence)."
+        )
+        return _finalize_paper_approval(
+            signal,
+            policy,
+            schwab_snapshot,
+            state_snapshot,
+            "Execution approved: 5MIN MACD crossover (simple mode).",
+        )
+
+    state_snapshot = {
+        "1MIN": get_current_state(signal.symbol, "1MIN"),
+        "5MIN": get_current_state(signal.symbol, "5MIN"),
+        "15MIN": get_current_state(signal.symbol, "15MIN"),
+    }
 
     def _matches(dir_str: str, value: Optional[str]) -> bool:
         if not value:
@@ -261,82 +354,12 @@ def decide_trade(
             schwab_snapshot=schwab_snapshot,
         )
 
-    # Basic price sanity check using Schwab quote if available.
-    warnings = []
-    reference_price = signal.sms_price
-    schwab_price = None
-
-    if schwab_snapshot:
-        schwab_price = _extract_price_from_quote(schwab_snapshot)
-        if reference_price is not None and schwab_price is not None:
-            diff = abs(schwab_price - reference_price)
-            pct = diff / reference_price if reference_price != 0 else 0.0
-            max_pct = float(policy.get("max_price_deviation_pct", 0.02))
-            if pct > max_pct:
-                reason = (
-                    f"Price deviation too large between SMS ({reference_price}) "
-                    f"and Schwab quote ({schwab_price}), deviation={pct:.4f}."
-                )
-                logger.info("Trade skipped: %s", reason)
-                return ExecutionDecision(
-                    should_execute=False,
-                    reason=reason,
-                    signal=signal,
-                    policy_snapshot=dict(policy),
-                    state_snapshot=state_snapshot,
-                    schwab_snapshot=schwab_snapshot,
-                )
-        else:
-            warnings.append("Could not compare SMS price to Schwab quote.")
-    else:
-        warnings.append("No Schwab quote provided; proceeding without quote-based checks.")
-
-    # Placeholder sizing logic: the real rules will be filled in later.
-    # For now we require an explicit quantity in policy to avoid surprises.
-    quantity = policy.get("default_quantity")
-    if not quantity:
-        reason = "No default_quantity specified in execution policy."
-        logger.info("Trade skipped: %s", reason)
-        return ExecutionDecision(
-            should_execute=False,
-            reason=reason,
-            signal=signal,
-            policy_snapshot=dict(policy),
-            state_snapshot=state_snapshot,
-            schwab_snapshot=schwab_snapshot,
-        )
-
-    side = "buy" if signal.direction.lower() == "bullish" else "sell"
-    order_type = str(policy.get("order_type", "market")).lower()
-
-    proposed = ProposedOrder(
-        symbol=signal.symbol,
-        side=side,
-        quantity=float(quantity),
-        order_type=order_type,
-        time_in_force=str(policy.get("time_in_force", "DAY")),
-        limit_price=policy.get("limit_price"),
-        extra={},
-    )
-
-    reason = "Execution approved by paper-trade confluence policy and price checks."
-    logger.info(
-        "Trade approved for %s %s x %s (%s).",
-        proposed.side,
-        proposed.symbol,
-        proposed.quantity,
-        proposed.order_type,
-    )
-
-    return ExecutionDecision(
-        should_execute=True,
-        reason=reason,
-        signal=signal,
-        proposed_order=proposed,
-        warnings=warnings,
-        policy_snapshot=dict(policy),
-        state_snapshot=state_snapshot,
-        schwab_snapshot=schwab_snapshot,
+    return _finalize_paper_approval(
+        signal,
+        policy,
+        schwab_snapshot,
+        state_snapshot,
+        "Execution approved by paper-trade confluence policy and price checks.",
     )
 
 
@@ -346,74 +369,15 @@ def execute_trade(
     policy: Dict[str, Any],
 ) -> Optional[TradeLogEntry]:
     """
-    Execute an approved trade decision via the Schwab client.
+    Live broker execution is intentionally disabled.
 
-    Returns a TradeLogEntry if an order was actually sent, or None if not.
-
-    This function assumes that the caller has already checked
-    decision.should_execute and is passing in a ready Schwab client
-    (with authentication handled elsewhere).
+    TradeAlerts only posts to Discord webhooks; no orders are sent to any broker.
     """
-
-    if not decision.should_execute or decision.proposed_order is None:
-        logger.info(
-            "execute_trade called with non-executable decision: %s", decision.reason
-        )
-        return None
-
-    entry_time = datetime.utcnow()
-
-    # Call out to the Schwab client. The exact shape of the response will depend
-    # on the client implementation; we keep this generic for now.
-    try:
-        response = schwab_client.place_order(decision.proposed_order, policy=policy)
-    except Exception as exc:
-        logger.exception("Error while placing Schwab order: %s", exc)
-        return None
-
-    order_id = getattr(response, "order_id", None) or response.get("order_id") if isinstance(
-        response, dict
-    ) else None
-
-    # Fill information may or may not be available immediately.
-    filled_at = None
-    filled_price = None
-    if isinstance(response, dict):
-        filled_at_raw = response.get("filled_at") or response.get("fill_time")
-        filled_price = response.get("filled_price")
-        if isinstance(filled_at_raw, datetime):
-            filled_at = filled_at_raw
-
-    log_entry = TradeLogEntry(
-        symbol=decision.signal.symbol,
-        timeframe=decision.signal.timeframe,
-        tag=decision.signal.tag,
-        direction=decision.signal.direction,
-        size=decision.proposed_order.quantity,
-        order_id=str(order_id) if order_id is not None else None,
-        entry_requested_at=entry_time,
-        filled_at=filled_at,
-        requested_price=decision.proposed_order.limit_price
-        or decision.signal.sms_price,
-        filled_price=filled_price,
-        signal_snapshot=decision.signal.to_dict(),
-        schwab_snapshot=dict(decision.schwab_snapshot),
-        decision_reason=decision.reason,
-        policy_version=str(policy.get("policy_version"))
-        if policy.get("policy_version") is not None
-        else None,
-        additional_info={"raw_response": response},
-    )
-
     logger.info(
-        "Order sent for %s %s x %s; order_id=%s",
-        log_entry.direction,
-        log_entry.symbol,
-        log_entry.size,
-        log_entry.order_id,
+        "execute_trade ignored (Discord-only deployment): %s",
+        decision.reason,
     )
-
-    return log_entry
+    return None
 
 
 def _extract_price_from_quote(quote: Dict[str, Any]) -> Optional[float]:
