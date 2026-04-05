@@ -28,35 +28,72 @@ def paper_execute_trade(
     csv_path: Optional[str] = None,
 ) -> Optional[TradeLogEntry]:
     """
-    Disabled: this app signals via the main Discord webhooks only (see send_discord_alert).
-
-    Previously this path used Schwab quotes/option chains for simulated BTO lines.
+    Legacy entry point: forwards to paper BTO Discord line (no broker orders).
     """
-    logger.info(
-        "paper_execute_trade skipped (Discord-only): symbol=%s timeframe=%s",
-        getattr(signal, "symbol", None),
-        getattr(signal, "timeframe", None),
-    )
+    if (signal.timeframe or "").upper() != "5MIN":
+        return None
+    send_paper_trade_bto_for_5min_macd(signal.symbol, signal.direction or "")
     return None
 
 
+def send_paper_trade_bto_for_5min_macd(symbol: str, direction: str) -> None:
+    """
+    On a 5MIN MACD cross only: post to paper-trade Discord (no orders).
+
+    Format: BTO {UNDERLYING} {STRIKE}{C|P} @ {MARK}
+    - Bullish -> call (C), bearish -> put (P)
+    - Contract: 0DTE (else 1DTE) with delta closest to +/-0.20
+    """
+    sym = (symbol or "SPY").upper()
+    d = (direction or "").strip().lower()
+    if d not in ("bullish", "bearish"):
+        logger.info("Paper BTO skipped: invalid direction %r", direction)
+        return
+    if not PAPER_TRADE_DISCORD_WEBHOOK:
+        logger.warning("PAPER_TRADE_DISCORD_WEBHOOK not set; skipping paper BTO Discord line.")
+        return
+
+    try:
+        client = SchwabClient({})
+    except Exception as exc:
+        logger.warning("Paper BTO skipped: Schwab client unavailable (%s)", exc)
+        return
+
+    sig = Signal(symbol=sym, timeframe="5MIN", tag="Call5" if d == "bullish" else "Put5", direction=d)
+    option_info = _select_0dte_option_for_signal(sig, client)
+    if option_info is None:
+        logger.info("Paper BTO skipped: no suitable option for %s %s", sym, d)
+        return
+
+    quote = option_info.get("quote") or {}
+    mark = _best_effort_mark_price(quote) or _best_effort_last_price(quote)
+    _send_paper_trade_discord_alert(
+        underlying=sym,
+        strike=option_info.get("strike"),
+        direction=d,
+        mark=mark,
+    )
+
+
 def _send_paper_trade_discord_alert(
+    underlying: str,
     strike: Optional[float],
     direction: str,
     mark: Optional[float],
 ) -> None:
     """
     Post a single line to the paper-trade Discord webhook:
-    BTO {strike}{C|P} @ {mark}
-    e.g. BTO 670C @ 1.21
+    BTO {UNDERLYING} {STRIKE}{C|P} @ {MARK}
+    e.g. BTO SPY 670C @ 1.21
     """
     if not PAPER_TRADE_DISCORD_WEBHOOK:
         logger.warning("PAPER_TRADE_DISCORD_WEBHOOK not set; skipping Discord alert.")
         return
+    sym = (underlying or "SPY").upper()
     strike_str = str(int(round(strike))) if strike is not None else "?"
     side = "C" if (direction or "").lower() == "bullish" else "P"
     mark_str = f"{mark:.2f}" if mark is not None else "?"
-    message = f"BTO {strike_str}{side} @ {mark_str}"
+    message = f"BTO {sym} {strike_str}{side} @ {mark_str}"
     try:
         with httpx.Client() as http:
             r = http.post(

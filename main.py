@@ -20,6 +20,7 @@ from confluence_rules import confluence_rules
 from webhook_manager import webhook_manager
 from alert_toggle_manager import alert_toggle_manager
 from alternative_channel import send_to_alternative_channel, set_alternative_webhook, get_alternative_webhook
+from TradeBot.paper_executor import send_paper_trade_bto_for_5min_macd
 
 # NEW: imports for scheduler/timezone
 import asyncio
@@ -36,6 +37,9 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Post BTO-style line to paper-trade Discord on each 5MIN MACD state change (no broker orders).
+PAPER_TRADE_BTO_SIGNALS = os.getenv("PAPER_TRADE_BTO_SIGNALS", "1") == "1"
 
 app = FastAPI(
     title="Trade Alerts SMS Parser",
@@ -836,7 +840,13 @@ async def receive_sms(request: Request):
 
         # Update system state based on detected crossovers (skip delayed EMA)
         if not ema_pending_handled:
-            update_system_state(parsed_data)
+            paper_5m_macd = update_system_state(parsed_data)
+            if paper_5m_macd and PAPER_TRADE_BTO_SIGNALS:
+                sym, macd_dir = paper_5m_macd
+                try:
+                    send_paper_trade_bto_for_5min_macd(sym, macd_dir)
+                except Exception as paper_bto_err:
+                    logger.error(f"Paper-trade BTO Discord signal failed: {paper_bto_err}")
 
         # Analyze the data and check for alerts (skip delayed EMA)
         if alert_config.enabled and not ema_pending_handled:
@@ -848,8 +858,12 @@ async def receive_sms(request: Request):
                 except Exception as task_error:
                     logger.error(f"Failed to create Discord alert task: {task_error}")
             else:
-                # Log skipped alerts that don't match known categories
-                logger.info(f"ALERT SKIPPED: Alert not categorized into known alert types. Parsed data: {json.dumps(parsed_data, indent=2)}")
+                # analyze_data returned False (time/weekend filter, MACD 5MIN EMA gate, etc.)
+                logger.info(
+                    "Discord alert not sent: analyze_data returned false "
+                    "(see prior ALERT FILTERED / MACD lines). "
+                    f"action={parsed_data.get('action')} timeframe={parsed_data.get('timeframe')}"
+                )
         
         # Send to alternative channel (independent of main channel, uses different rules)
         # This runs regardless of main channel filtering - it has its own rules
@@ -1123,12 +1137,16 @@ def parse_sms_data(message: str) -> Dict[str, Any]:
     
     return parsed
 
-def update_system_state(parsed_data: Dict[str, Any]):
+def update_system_state(parsed_data: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     """
     Update timeframe state based on detected crossover
     This function records EMA and MACD crossovers to maintain state tracking
     Checks current status and only updates if different
+
+    Returns:
+        (symbol, macd_direction) when a 5MIN MACD cross was newly recorded; else None.
     """
+    paper_5m_macd_cross: Optional[Tuple[str, str]] = None
     try:
         symbol = parsed_data.get('symbol', 'SPY')
         timeframe = parsed_data.get('timeframe')
@@ -1136,7 +1154,7 @@ def update_system_state(parsed_data: Dict[str, Any]):
         
         if not timeframe:
             logger.warning(f"No timeframe found for state update: {symbol}")
-            return
+            return None
         
         # Get current state for this symbol/timeframe
         current_state = state_manager.get_timeframe_state(symbol, timeframe)
@@ -1155,6 +1173,8 @@ def update_system_state(parsed_data: Dict[str, Any]):
                     )
                     if success:
                         logger.info(f"STATE UPDATE: {symbol} {timeframe} MACD -> {direction.upper()}")
+                        if (timeframe or "").upper() == "5MIN":
+                            paper_5m_macd_cross = (symbol, direction)
                     else:
                         logger.error(f"Failed to update MACD state for {symbol} {timeframe}")
                 else:
@@ -1200,9 +1220,12 @@ def update_system_state(parsed_data: Dict[str, Any]):
         
         else:
             logger.debug(f"No state update needed for action: {parsed_data.get('action')}")
-            
+
+        return paper_5m_macd_cross
+
     except Exception as e:
         logger.error(f"Error updating system state: {e}")
+        return None
 
 def _create_pending_ema(parsed_data: Dict[str, Any]) -> bool:
     """No-op: EMA pending confirmation delays disabled."""
