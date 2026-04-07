@@ -1486,9 +1486,16 @@ def analyze_data(parsed_data: Dict[str, Any]) -> bool:
         
         logger.info(f"MACD ALERT CHECK: {symbol} {timeframe} - Current MACD: {macd_direction}")
 
-        # MACD signals to Discord REQUIRE 5MIN EMA confluence (direction must match).
-        five_min_state = state_manager.get_timeframe_state(symbol, '5MIN')
-        five_min_ema_status = (five_min_state.get('ema_status') if five_min_state else None) or 'UNKNOWN'
+        # 5MIN MACD: always allow Discord when direction is valid (no EMA confluence filter).
+        if (timeframe or "").upper() == "5MIN":
+            logger.info(
+                f"MACD SIGNAL TRIGGERED: {symbol} 5MIN - unfiltered (no 5MIN EMA gate); MACD={macd_direction}"
+            )
+            return True
+
+        # Other timeframes: require 5MIN EMA direction to match MACD for Discord.
+        five_min_state = state_manager.get_timeframe_state(symbol, "5MIN")
+        five_min_ema_status = (five_min_state.get("ema_status") if five_min_state else None) or "UNKNOWN"
         five_min_ema_status = str(five_min_ema_status).upper()
 
         if five_min_ema_status == macd_direction:
