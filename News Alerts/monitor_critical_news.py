@@ -57,8 +57,11 @@ BLOCK_HEAVY_RESOURCES = os.environ.get("NEWS_ALERTS_BLOCK_RESOURCES", "1").strip
     "true",
     "yes",
 )
+# Extra wait + second parse so "breaking" CSS can apply after the row first appears as news-general
+CRITICAL_RECHECK_SECONDS = float(os.environ.get("NEWS_ALERTS_CRITICAL_RECHECK_SECONDS", "0.8"))
 FEED_ROW = ".feedWrap"
 FEED_READY = ".feedWrap"
+CRITICAL_SELECTOR = ".feedWrap.active-critical"
 
 logging.basicConfig(
     level=os.environ.get("NEWS_ALERTS_LOG_LEVEL", "INFO"),
@@ -134,6 +137,55 @@ def parse_feed_rows(page) -> list[dict[str, str | bool]]:
     return out
 
 
+def merge_feed_rows(
+    rows_a: list[dict[str, str | bool]],
+    rows_b: list[dict[str, str | bool]],
+) -> list[dict[str, str | bool]]:
+    """Merge two parses by id; critical is True if either pass had it."""
+    by_id: dict[str, dict[str, str | bool]] = {}
+    for r in rows_a + rows_b:
+        rid = str(r["id"])
+        if rid not in by_id:
+            by_id[rid] = dict(r)
+        else:
+            by_id[rid]["critical"] = bool(by_id[rid]["critical"]) or bool(r["critical"])
+    return list(by_id.values())
+
+
+def critical_news_ids_from_page(page) -> set[str]:
+    """IDs that appear under .feedWrap.active-critical (authoritative for breaking/red)."""
+    ids: set[str] = set()
+    for el in page.locator(CRITICAL_SELECTOR).all():
+        url = ""
+        try:
+            nav = el.locator("ul.social-nav").first
+            url = (nav.get_attribute("data-link") or "").strip()
+        except Exception:
+            pass
+        m = _NEWS_ID_RE.search(url)
+        if m:
+            ids.add(m.group(1))
+            continue
+        try:
+            title = el.locator(".headline-title-nolink").first.inner_text(
+                timeout=5_000
+            ).strip()
+        except Exception:
+            continue
+        if title:
+            ids.add(str(abs(hash(title))))
+    return ids
+
+
+def apply_critical_flags(
+    rows: list[dict[str, str | bool]], crit_ids: set[str]
+) -> None:
+    """Set critical=True when id is in the breaking-news set (overrides class timing issues)."""
+    for row in rows:
+        rid = str(row["id"])
+        row["critical"] = rid in crit_ids or bool(row["critical"])
+
+
 def send_discord(webhook: str, title: str, *, mention_everyone: bool) -> None:
     body = title
     if mention_everyone:
@@ -142,6 +194,7 @@ def send_discord(webhook: str, title: str, *, mention_everyone: bool) -> None:
         body = body[:1997] + "..."
     payload: dict = {"content": body}
     if mention_everyone:
+        # Webhooks must opt in or @everyone is suppressed / non-pinging
         payload["allowed_mentions"] = {"parse": ["everyone"]}
     r = requests.post(webhook, json=payload, timeout=30)
     r.raise_for_status()
@@ -184,6 +237,11 @@ def run_loop(webhook: str) -> None:
                 )
                 time.sleep(FEED_SETTLE_SECONDS)
                 rows = parse_feed_rows(page)
+                if CRITICAL_RECHECK_SECONDS > 0:
+                    time.sleep(CRITICAL_RECHECK_SECONDS)
+                    rows = merge_feed_rows(rows, parse_feed_rows(page))
+                crit_ids = critical_news_ids_from_page(page)
+                apply_critical_flags(rows, crit_ids)
 
                 if not primed:
                     for row in rows:
