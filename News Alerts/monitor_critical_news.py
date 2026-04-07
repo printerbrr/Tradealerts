@@ -1,7 +1,7 @@
 """
 Headless monitor for FinancialJuice home feed: posts every news item to Discord.
 
-Message = headline + optional body from .headline-content (no article URL).
+Message = DD/MM/YY HH:MM (timezone configurable) + headline + optional body (no article URL).
 
 Items with class active-critical (red breaking) prepend @everyone (requires the
 webhook/channel to allow @everyone mentions).
@@ -32,7 +32,9 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -64,6 +66,8 @@ CRITICAL_RECHECK_SECONDS = float(os.environ.get("NEWS_ALERTS_CRITICAL_RECHECK_SE
 FEED_ROW = ".feedWrap"
 FEED_READY = ".feedWrap"
 CRITICAL_SELECTOR = ".feedWrap.active-critical"
+# IANA timezone for the leading timestamp (Railway is often UTC)
+NEWS_ALERTS_TIMEZONE = os.environ.get("NEWS_ALERTS_TIMEZONE", "UTC").strip() or "UTC"
 
 logging.basicConfig(
     level=os.environ.get("NEWS_ALERTS_LOG_LEVEL", "INFO"),
@@ -199,6 +203,15 @@ def critical_news_ids_from_page(page) -> set[str]:
     return ids
 
 
+def _message_timestamp_line() -> str:
+    """DD/MM/YY Hour:Minute (no seconds)."""
+    try:
+        tz = ZoneInfo(NEWS_ALERTS_TIMEZONE)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz).strftime("%d/%m/%y %H:%M")
+
+
 def apply_critical_flags(
     rows: list[dict[str, str | bool]], crit_ids: set[str]
 ) -> None:
@@ -213,11 +226,14 @@ def send_discord(
 ) -> None:
     article_body = (article_body or "").strip()
     if article_body:
-        text = f"{title}\n\n{article_body}"
+        core = f"{title}\n\n{article_body}"
     else:
-        text = title
+        core = title
+    stamp = _message_timestamp_line()
     if mention_everyone:
-        text = f"@everyone\n\n{text}"
+        text = f"{stamp}\n\n@everyone\n\n{core}"
+    else:
+        text = f"{stamp}\n\n{core}"
     if len(text) > 2000:
         text = text[:1997] + "..."
     payload: dict = {"content": text}
