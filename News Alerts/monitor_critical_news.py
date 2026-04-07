@@ -15,8 +15,9 @@ Usage (local):
   set NEWS_ALERTS_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
   python monitor_critical_news.py
 
-Railway build command (news worker service) — use python -m playwright, not bare `playwright`:
-  pip install -r requirements.txt && python -m playwright install chromium && python -m playwright install-deps chromium
+Railway build command (news worker) — use python -m playwright; set PLAYWRIGHT_BROWSERS_PATH=0
+  so browsers live under the venv (default /root/.cache is not in the runtime image):
+  PLAYWRIGHT_BROWSERS_PATH=0 pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install-deps chromium
   Or: pip install -r requirements.txt && sh scripts/install_playwright_railway.sh
 """
 
@@ -32,9 +33,13 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
 
 load_dotenv()
+# Bundle browsers in site-packages (Playwright "0" path). Required on Railway: /root/.cache
+# from `playwright install` is not present at runtime.
+os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
+from playwright.sync_api import sync_playwright
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 STATE_PATH = SCRIPT_DIR / "seen_news_ids.json"
