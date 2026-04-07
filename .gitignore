@@ -1,5 +1,6 @@
 # Sensitive configuration files
 discord_config.txt
+news_alerts_webhook.txt
 discord_webhooks.json
 price_alert_webhook.txt
 alert_toggles.json
@@ -17,6 +18,9 @@ venv/
 # Databases
 *.db
 market_states*.db
+
+# News Alerts (FinancialJuice monitor state)
+News Alerts/seen_news_ids.json
 
 # Logs
 *.log
