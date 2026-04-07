@@ -15,10 +15,11 @@ Usage (local):
   set NEWS_ALERTS_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
   python monitor_critical_news.py
 
-Railway build command (news worker) — use python -m playwright; set PLAYWRIGHT_BROWSERS_PATH=0
-  so browsers live under the venv (default /root/.cache is not in the runtime image):
-  PLAYWRIGHT_BROWSERS_PATH=0 pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install chromium && PLAYWRIGHT_BROWSERS_PATH=0 python -m playwright install-deps chromium
-  Or: pip install -r requirements.txt && sh scripts/install_playwright_railway.sh
+Railway (recommended): build from Dockerfile.newsmonitor (Playwright image includes OS libs + browsers).
+  Service → Settings → Build → Dockerfile path → Dockerfile.newsmonitor
+
+Railpack fallback (often fails missing .so at runtime): PLAYWRIGHT_BROWSERS_PATH=0 pip install -r requirements.txt
+  && sh scripts/install_playwright_railway.sh
 """
 
 from __future__ import annotations
@@ -147,7 +148,11 @@ def run_loop(webhook: str) -> None:
     primed = bool(seen)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # --no-sandbox / --disable-dev-shm-usage: required in many Linux containers (Railway/Docker).
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
         context = browser.new_context(
             locale="en-US",
             user_agent=(

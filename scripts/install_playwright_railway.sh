@@ -5,5 +5,5 @@
 # includes them (default cache under /root/.cache is dropped on Railway).
 set -e
 export PLAYWRIGHT_BROWSERS_PATH=0
-python -m playwright install chromium
-python -m playwright install-deps chromium
+# --with-deps installs apt libraries (Railpack may still drop them at runtime — prefer Dockerfile.newsmonitor)
+python -m playwright install --with-deps chromium

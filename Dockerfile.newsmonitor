@@ -1,0 +1,20 @@
+# FinancialJuice Discord news worker only.
+# In Railway: this service → Settings → Build → Dockerfile path → Dockerfile.newsmonitor
+# (Do not rename to "Dockerfile" or the API service may use it unless you override per service.)
+#
+# Pin matches playwright==1.49.1 in requirements.txt — keep them in sync when upgrading.
+
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1
+# Preinstalled browsers in this image; avoids PLAYWRIGHT_BROWSERS_PATH=0 (venv) lookup
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+CMD ["python", "News Alerts/monitor_critical_news.py"]
