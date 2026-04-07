@@ -1,6 +1,8 @@
 """
 Headless monitor for FinancialJuice home feed: posts every news item to Discord.
 
+Message = headline + optional body from .headline-content (no article URL).
+
 Items with class active-critical (red breaking) prepend @everyone (requires the
 webhook/channel to allow @everyone mentions).
 
@@ -105,8 +107,17 @@ def save_seen(seen: set[str]) -> None:
 _NEWS_ID_RE = re.compile(r"/News/(\d+)/", re.I)
 
 
+def _row_article_body(el) -> str:
+    """Extra paragraph/body under the headline (no link)."""
+    try:
+        raw = el.locator(".headline-content").first.inner_text(timeout=3_000)
+        return raw.strip()
+    except Exception:
+        return ""
+
+
 def parse_feed_rows(page) -> list[dict[str, str | bool]]:
-    """Return list of {id, title, url, critical} for each .feedWrap row."""
+    """Return list of {id, title, body, url, critical} for each .feedWrap row."""
     out: list[dict[str, str | bool]] = []
     for el in page.locator(FEED_ROW).all():
         try:
@@ -121,6 +132,7 @@ def parse_feed_rows(page) -> list[dict[str, str | bool]]:
             continue
         if not title:
             continue
+        article_body = _row_article_body(el)
         url = ""
         try:
             nav = el.locator("ul.social-nav").first
@@ -132,7 +144,13 @@ def parse_feed_rows(page) -> list[dict[str, str | bool]]:
         if not nid:
             nid = str(abs(hash(title)))
         out.append(
-            {"id": str(nid), "title": title, "url": url, "critical": critical}
+            {
+                "id": str(nid),
+                "title": title,
+                "body": article_body,
+                "url": url,
+                "critical": critical,
+            }
         )
     return out
 
@@ -149,6 +167,10 @@ def merge_feed_rows(
             by_id[rid] = dict(r)
         else:
             by_id[rid]["critical"] = bool(by_id[rid]["critical"]) or bool(r["critical"])
+            b1 = str(by_id[rid].get("body", "")).strip()
+            b2 = str(r.get("body", "")).strip()
+            if len(b2) > len(b1):
+                by_id[rid]["body"] = b2
     return list(by_id.values())
 
 
@@ -186,13 +208,19 @@ def apply_critical_flags(
         row["critical"] = rid in crit_ids or bool(row["critical"])
 
 
-def send_discord(webhook: str, title: str, *, mention_everyone: bool) -> None:
-    body = title
+def send_discord(
+    webhook: str, title: str, article_body: str, *, mention_everyone: bool
+) -> None:
+    article_body = (article_body or "").strip()
+    if article_body:
+        text = f"{title}\n\n{article_body}"
+    else:
+        text = title
     if mention_everyone:
-        body = f"@everyone\n\n{body}"
-    if len(body) > 2000:
-        body = body[:1997] + "..."
-    payload: dict = {"content": body}
+        text = f"@everyone\n\n{text}"
+    if len(text) > 2000:
+        text = text[:1997] + "..."
+    payload: dict = {"content": text}
     if mention_everyone:
         # Webhooks must opt in or @everyone is suppressed / non-pinging
         payload["allowed_mentions"] = {"parse": ["everyone"]}
@@ -268,6 +296,7 @@ def run_loop(webhook: str) -> None:
                             send_discord(
                                 webhook,
                                 str(row["title"]),
+                                str(row.get("body", "")),
                                 mention_everyone=crit,
                             )
                         except Exception as e:
