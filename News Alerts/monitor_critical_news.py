@@ -47,8 +47,16 @@ STATE_PATH = SCRIPT_DIR / "seen_news_ids.json"
 WEBHOOK_FILE = SCRIPT_DIR / "news_alerts_webhook.txt"
 
 FJ_URL = os.environ.get("FINANCIALJUICE_URL", "https://www.financialjuice.com/home")
-POLL_SECONDS = float(os.environ.get("NEWS_ALERTS_POLL_SECONDS", "30"))
+POLL_SECONDS = float(os.environ.get("NEWS_ALERTS_POLL_SECONDS", "10"))
 NAV_TIMEOUT_MS = int(os.environ.get("NEWS_ALERTS_NAV_TIMEOUT_MS", "60000"))
+# Seconds to wait after feed DOM attaches (let JS paint headlines)
+FEED_SETTLE_SECONDS = float(os.environ.get("NEWS_ALERTS_FEED_SETTLE_SECONDS", "0.4"))
+# Block images/fonts/media on the page load to reduce latency (feed text is in DOM)
+BLOCK_HEAVY_RESOURCES = os.environ.get("NEWS_ALERTS_BLOCK_RESOURCES", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 FEED_ROW = ".feedWrap"
 FEED_READY = ".feedWrap"
 
@@ -126,12 +134,8 @@ def parse_feed_rows(page) -> list[dict[str, str | bool]]:
     return out
 
 
-def send_discord(
-    webhook: str, title: str, url: str, *, mention_everyone: bool
-) -> None:
+def send_discord(webhook: str, title: str, *, mention_everyone: bool) -> None:
     body = title
-    if url:
-        body = f"{title}\n{url}"
     if mention_everyone:
         body = f"@everyone\n\n{body}"
     if len(body) > 2000:
@@ -160,6 +164,15 @@ def run_loop(webhook: str) -> None:
                 "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ),
         )
+        if BLOCK_HEAVY_RESOURCES:
+
+            def _route_handle(route) -> None:
+                if route.request.resource_type in ("image", "font", "media"):
+                    route.abort()
+                else:
+                    route.continue_()
+
+            context.route("**/*", _route_handle)
         page = context.new_page()
 
         while True:
@@ -169,7 +182,7 @@ def run_loop(webhook: str) -> None:
                 page.wait_for_selector(
                     FEED_READY, state="attached", timeout=NAV_TIMEOUT_MS
                 )
-                time.sleep(1.0)
+                time.sleep(FEED_SETTLE_SECONDS)
                 rows = parse_feed_rows(page)
 
                 if not primed:
@@ -197,7 +210,6 @@ def run_loop(webhook: str) -> None:
                             send_discord(
                                 webhook,
                                 str(row["title"]),
-                                str(row["url"]),
                                 mention_everyone=crit,
                             )
                         except Exception as e:
