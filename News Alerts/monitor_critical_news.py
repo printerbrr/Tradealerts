@@ -34,8 +34,8 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+import pytz
 import requests
 from dotenv import load_dotenv
 
@@ -204,11 +204,15 @@ def critical_news_ids_from_page(page) -> set[str]:
 
 
 def _message_timestamp_line() -> str:
-    """DD/MM/YY Hour:Minute (no seconds)."""
+    """DD/MM/YY Hour:Minute (no seconds).
+
+    Uses pytz (already in requirements) — stdlib zoneinfo needs OS/tzdata data
+    missing in some Docker images (ModuleNotFoundError: tzdata).
+    """
     try:
-        tz = ZoneInfo(NEWS_ALERTS_TIMEZONE)
+        tz = pytz.timezone(NEWS_ALERTS_TIMEZONE)
     except Exception:
-        tz = ZoneInfo("UTC")
+        tz = pytz.UTC
     return datetime.now(tz).strftime("%d/%m/%y %H:%M")
 
 
