@@ -68,6 +68,11 @@ FEED_READY = ".feedWrap"
 CRITICAL_SELECTOR = ".feedWrap.active-critical"
 # IANA timezone for the leading timestamp (Railway is often UTC)
 NEWS_ALERTS_TIMEZONE = os.environ.get("NEWS_ALERTS_TIMEZONE", "UTC").strip() or "UTC"
+# Discord webhook rate limits: space posts + retry on 429 (Retry-After)
+DISCORD_MIN_GAP_SECONDS = float(
+    os.environ.get("NEWS_ALERTS_DISCORD_MIN_GAP_SECONDS", "1.25")
+)
+DISCORD_MAX_RETRIES_429 = int(os.environ.get("NEWS_ALERTS_DISCORD_MAX_RETRIES", "12"))
 
 logging.basicConfig(
     level=os.environ.get("NEWS_ALERTS_LOG_LEVEL", "INFO"),
@@ -75,6 +80,55 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("financialjuice_news")
+
+_last_discord_post_mono: float = 0.0
+
+
+def _discord_spacing_wait() -> None:
+    """Avoid bursting many webhooks in one poll (Discord ~30/min per webhook)."""
+    global _last_discord_post_mono
+    gap = DISCORD_MIN_GAP_SECONDS
+    if gap <= 0:
+        return
+    now = time.monotonic()
+    wait = gap - (now - _last_discord_post_mono)
+    if wait > 0:
+        time.sleep(wait)
+    _last_discord_post_mono = time.monotonic()
+
+
+def _post_discord_payload(webhook: str, payload: dict) -> None:
+    """POST with 429 retries (Retry-After). 404 = invalid/deleted webhook, no retry."""
+    attempt = 0
+    while True:
+        r = requests.post(webhook, json=payload, timeout=30)
+        if r.status_code == 429:
+            attempt += 1
+            if attempt > DISCORD_MAX_RETRIES_429:
+                logger.error(
+                    "Discord 429 after %s retries; give up (check min gap / volume)",
+                    DISCORD_MAX_RETRIES_429,
+                )
+                r.raise_for_status()
+            try:
+                wait_s = float(r.headers.get("Retry-After", "2"))
+            except (TypeError, ValueError):
+                wait_s = 2.0
+            logger.warning(
+                "Discord rate limited (429), sleeping %.1fs then retry %s/%s",
+                wait_s,
+                attempt,
+                DISCORD_MAX_RETRIES_429,
+            )
+            time.sleep(wait_s)
+            continue
+        if r.status_code == 404:
+            logger.error(
+                "Discord webhook returned 404 — URL invalid or webhook was deleted. "
+                "Update NEWS_ALERTS_DISCORD_WEBHOOK_URL in Railway."
+            )
+        r.raise_for_status()
+        return
 
 
 def resolve_webhook() -> str | None:
@@ -244,8 +298,8 @@ def send_discord(
     if mention_everyone:
         # Webhooks must opt in or @everyone is suppressed / non-pinging
         payload["allowed_mentions"] = {"parse": ["everyone"]}
-    r = requests.post(webhook, json=payload, timeout=30)
-    r.raise_for_status()
+    _discord_spacing_wait()
+    _post_discord_payload(webhook, payload)
 
 
 def run_loop(webhook: str) -> None:
