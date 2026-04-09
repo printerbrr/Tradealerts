@@ -1,15 +1,14 @@
 """
-Headless monitor for FinancialJuice home feed: posts every news item to Discord.
+Headless monitor for FinancialJuice home feed: posts only active-critical (red
+breaking) headlines to Discord.
 
-Message = DD/MM/YY HH:MM (timezone configurable) + headline + optional body (no article URL).
-
-Items with class active-critical (red breaking) prepend @everyone (requires the
-webhook/channel to allow @everyone mentions).
+Message = DD/MM/YY HH:MM (timezone configurable) + @everyone + headline + optional
+body (no article URL). Requires the webhook/channel to allow @everyone mentions.
 
 Loads webhook from NEWS_ALERTS_DISCORD_WEBHOOK_URL, DISCORD_WEBHOOK_URL, or
 news_alerts_webhook.txt.
 
-First run: records all visible headline IDs without posting (avoids spamming history).
+First run: records current breaking headline IDs without posting (avoids spamming history).
 
 Usage (local):
   pip install -r requirements.txt
@@ -47,11 +46,11 @@ os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 from playwright.sync_api import sync_playwright
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-STATE_PATH = SCRIPT_DIR / "seen_news_ids.json"
+STATE_PATH = SCRIPT_DIR / "seen_critical_ids.json"
 WEBHOOK_FILE = SCRIPT_DIR / "news_alerts_webhook.txt"
 
 FJ_URL = os.environ.get("FINANCIALJUICE_URL", "https://www.financialjuice.com/home")
-POLL_SECONDS = float(os.environ.get("NEWS_ALERTS_POLL_SECONDS", "10"))
+POLL_SECONDS = float(os.environ.get("NEWS_ALERTS_POLL_SECONDS", "5"))
 NAV_TIMEOUT_MS = int(os.environ.get("NEWS_ALERTS_NAV_TIMEOUT_MS", "60000"))
 # Seconds to wait after feed DOM attaches (let JS paint headlines)
 FEED_SETTLE_SECONDS = float(os.environ.get("NEWS_ALERTS_FEED_SETTLE_SECONDS", "0.4"))
@@ -344,34 +343,31 @@ def run_loop(webhook: str) -> None:
                     rows = merge_feed_rows(rows, parse_feed_rows(page))
                 crit_ids = critical_news_ids_from_page(page)
                 apply_critical_flags(rows, crit_ids)
+                critical_rows = [r for r in rows if bool(r["critical"])]
 
                 if not primed:
-                    for row in rows:
+                    for row in critical_rows:
                         seen.add(str(row["id"]))
                     save_seen(seen)
                     primed = True
                     logger.info(
-                        "Primed: recorded %s existing headline(s); no Discord posts.",
-                        len(rows),
+                        "Primed: recorded %s active-critical headline(s); no Discord posts.",
+                        len(critical_rows),
                     )
                 else:
-                    for row in rows:
+                    for row in critical_rows:
                         rid = str(row["id"])
                         if rid in seen:
                             continue
                         seen.add(rid)
                         save_seen(seen)
-                        crit = bool(row["critical"])
-                        tag = "critical" if crit else "news"
-                        logger.info(
-                            "New %s: %s", tag, str(row["title"])[:80]
-                        )
+                        logger.info("New critical: %s", str(row["title"])[:80])
                         try:
                             send_discord(
                                 webhook,
                                 str(row["title"]),
                                 str(row.get("body", "")),
-                                mention_everyone=crit,
+                                mention_everyone=True,
                             )
                         except Exception as e:
                             logger.exception("Discord post failed: %s", e)

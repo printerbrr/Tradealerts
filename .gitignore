@@ -20,6 +20,7 @@ venv/
 market_states*.db
 
 # News Alerts (FinancialJuice monitor state)
+News Alerts/seen_critical_ids.json
 News Alerts/seen_news_ids.json
 
 # Logs
