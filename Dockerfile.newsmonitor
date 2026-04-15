@@ -14,6 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
+# Playwright's Node driver defaults ~2GB heap; long runs OOM without this (see monitor logs).
+ENV NODE_OPTIONS=--max-old-space-size=4096
 # Preinstalled browsers in this image; avoids PLAYWRIGHT_BROWSERS_PATH=0 (venv) lookup
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 

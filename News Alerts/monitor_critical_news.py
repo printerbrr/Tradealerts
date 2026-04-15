@@ -62,6 +62,11 @@ BLOCK_HEAVY_RESOURCES = os.environ.get("NEWS_ALERTS_BLOCK_RESOURCES", "1").strip
 )
 # Extra wait + second parse so "breaking" CSS can apply after the row first appears as news-general
 CRITICAL_RECHECK_SECONDS = float(os.environ.get("NEWS_ALERTS_CRITICAL_RECHECK_SECONDS", "0.8"))
+# Close and relaunch Chromium on this interval to cap memory (Playwright/Node heap leaks over days).
+# Set to 0 to disable. Dockerfile sets NODE_OPTIONS for the driver heap; recycling still helps Chromium RAM.
+BROWSER_RESTART_SECONDS = float(
+    os.environ.get("NEWS_ALERTS_BROWSER_RESTART_SECONDS", "14400")
+)
 FEED_ROW = ".feedWrap"
 FEED_READY = ".feedWrap"
 CRITICAL_SELECTOR = ".feedWrap.active-critical"
@@ -81,6 +86,40 @@ logging.basicConfig(
 logger = logging.getLogger("financialjuice_news")
 
 _last_discord_post_mono: float = 0.0
+
+
+def _route_block_heavy(route) -> None:
+    if route.request.resource_type in ("image", "font", "media"):
+        route.abort()
+    else:
+        route.continue_()
+
+
+def _launch_browser_context_page(p):
+    """Fresh Chromium browser + context + page (used on startup and periodic recycle)."""
+    browser = p.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+    )
+    context = browser.new_context(
+        locale="en-US",
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    )
+    if BLOCK_HEAVY_RESOURCES:
+        context.route("**/*", _route_block_heavy)
+    page = context.new_page()
+    return browser, context, page
+
+
+def _dispose_browser(browser, context, page) -> None:
+    for obj in (page, context, browser):
+        try:
+            obj.close()
+        except Exception:
+            pass
 
 
 def _discord_spacing_wait() -> None:
@@ -306,28 +345,13 @@ def run_loop(webhook: str) -> None:
     primed = bool(seen)
 
     with sync_playwright() as p:
-        # --no-sandbox / --disable-dev-shm-usage: required in many Linux containers (Railway/Docker).
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
-        context = browser.new_context(
-            locale="en-US",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        if BLOCK_HEAVY_RESOURCES:
-
-            def _route_handle(route) -> None:
-                if route.request.resource_type in ("image", "font", "media"):
-                    route.abort()
-                else:
-                    route.continue_()
-
-            context.route("**/*", _route_handle)
-        page = context.new_page()
+        browser, context, page = _launch_browser_context_page(p)
+        browser_started_mono = time.monotonic()
+        if BROWSER_RESTART_SECONDS > 0:
+            logger.info(
+                "Browser recycle every %.0fs (NEWS_ALERTS_BROWSER_RESTART_SECONDS)",
+                BROWSER_RESTART_SECONDS,
+            )
 
         while True:
             try:
@@ -376,6 +400,14 @@ def run_loop(webhook: str) -> None:
 
             except Exception as e:
                 logger.warning("Poll error: %s", e)
+
+            if BROWSER_RESTART_SECONDS > 0 and (
+                time.monotonic() - browser_started_mono >= BROWSER_RESTART_SECONDS
+            ):
+                logger.info("Recycling browser to limit memory growth")
+                _dispose_browser(browser, context, page)
+                browser, context, page = _launch_browser_context_page(p)
+                browser_started_mono = time.monotonic()
 
             time.sleep(POLL_SECONDS)
 
